@@ -490,12 +490,24 @@
       </div>
       <div class="apps-script-box" id="scriptBox">
 <button class="copy-btn" id="copyScriptBtn">Copy</button>function doPost(e) {
+  var data = JSON.parse(e.postData.contents);
+
+  if (data.recordType === 'expense') {
+    var expSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Expenses");
+    if (!expSheet) {
+      expSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Expenses");
+      expSheet.appendRow(["Date","Category","Note","Amount"]);
+    }
+    expSheet.appendRow([data.date, data.category, data.note, data.amount]);
+    return ContentService.createTextOutput(JSON.stringify({status:"success"}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Invoices");
   if (!sheet) {
     sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Invoices");
     sheet.appendRow(["Invoice No","Platform","Order ID","Date","Customer Name","Mobile","Address","Products","Subtotal","Delivery Charge","Grand Total","Total Cost","Delivery Cost Paid","Packaging Cost","Transport Cost","Freelancer Fee","Profit"]);
   }
-  var data = JSON.parse(e.postData.contents);
   sheet.appendRow([
     data.invoiceNo, data.platform, data.orderId, data.date, data.customerName,
     data.mobile, data.address, data.products,
@@ -798,6 +810,7 @@ function saveInvoice(){
       method:'POST', mode:'no-cors',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
       body: JSON.stringify({
+        recordType:'invoice',
         invoiceNo:d.invoiceNo, platform:d.platform, orderId:d.orderId, date:d.date,
         customerName:d.customerName, mobile:d.mobile, address:d.address,
         products: d.items.map(i=>`${i.name} (${i.model}) x${i.qty} @${i.price} [cost ${i.cost}] [${i.warranty>0?i.warranty+' '+(i.warrantyUnit||"Months")+' warranty':'no warranty'}]${i.supplier?` [supplier: ${i.supplier}]`:''}${i.proofLink?` [proof: ${i.proofLink}]`:''}`).join(' | '),
@@ -979,6 +992,14 @@ function addExpense(){
   document.getElementById('expNote').value='';
   renderExpenses();
   toast('Expense added');
+
+  if(state.webhookUrl){
+    fetch(state.webhookUrl, {
+      method:'POST', mode:'no-cors',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ recordType:'expense', date, category, amount, note })
+    }).catch(()=>{});
+  }
 }
 
 window.deleteExpense = function(idx){
