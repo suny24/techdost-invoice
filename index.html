@@ -229,11 +229,12 @@
       <h2><span class="num">3</span> Products</h2>
       <table class="prod-table">
         <thead>
-          <tr><th>Product</th><th style="width:130px;">Model/Serial</th><th style="width:60px;">Qty</th><th style="width:95px;">Cost price</th><th style="width:95px;">Sell price</th><th style="width:135px;">Warranty</th><th style="width:100px;">Total</th><th></th></tr>
+          <tr><th style="width:28px;"></th><th>Product</th><th style="width:130px;">Model/Serial</th><th style="width:60px;">Qty</th><th style="width:95px;">Cost price</th><th style="width:95px;">Sell price</th><th style="width:135px;">Warranty</th><th style="width:100px;">Total</th><th></th></tr>
         </thead>
         <tbody id="prodBody"></tbody>
       </table>
       <button class="add-row-btn" id="addRowBtn">+ Add product</button>
+      <datalist id="supplierDatalist"></datalist>
       <p class="settings-note">Choose Days or Months for warranty (e.g. 15 Days for short warranties). Set warranty to 0 for products with no warranty. Cost price (highlighted) is what you paid the supplier — it's for your own profit tracking only and never appears on the printed customer invoice.</p>
     </div>
 
@@ -390,6 +391,12 @@
     </div>
 
     <div class="card">
+      <h2>Monthly reconciliation</h2>
+      <p class="settings-note">Revenue, costs, and profit broken down by month — for matching your books at month/year end.</p>
+      <div id="monthlyWrap" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
       <h2>Office expenses</h2>
       <p class="settings-note">General overhead not tied to a specific order — rent, utilities, staff, etc.</p>
       <div class="grid3">
@@ -452,6 +459,16 @@
       <div class="row-actions">
         <input id="newPlatformInput" type="text" placeholder="e.g. Instagram, Personal" style="max-width:260px;">
         <button class="btn btn-secondary" id="addPlatformBtn">+ Add platform</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Manage suppliers</h2>
+      <p class="settings-note">Add your regular suppliers. These show up as autocomplete suggestions in each product's Supplier field — still free text, so you can type a one-off retailer name when a supplier is out of stock.</p>
+      <div id="supplierList" style="margin:12px 0;"></div>
+      <div class="row-actions">
+        <input id="newSupplierInput" type="text" placeholder="e.g. Agrabad Toner House" style="max-width:260px;">
+        <button class="btn btn-secondary" id="addSupplierBtn">+ Add supplier</button>
       </div>
     </div>
 
@@ -532,6 +549,7 @@ let state = {
   prefix:"TD", nextNum:1,
   webhookUrl:"",
   platforms: ["Facebook","Daraz","Personal","WhatsApp","Website"],
+  suppliers: [],
   invoices: [],
   expenses: []
 };
@@ -546,7 +564,9 @@ function fmtMoney(n){ return 'BDT ' + (Math.round(n*100)/100).toLocaleString('en
 
 function addProductRow(data){
   const tr = document.createElement('tr');
+  tr.className = 'prod-main-row';
   tr.innerHTML = `
+    <td><button type="button" class="icon-btn prod-expand-btn" title="Supplier & warranty proof" style="color:var(--teal-mid);font-size:14px;">▸</button></td>
     <td><input class="p-name" type="text" placeholder="Product name" value="${data?.name||''}"></td>
     <td><input class="p-model" type="text" placeholder="Model/Serial" value="${data?.model||''}"></td>
     <td><input class="p-qty" type="number" min="1" value="${data?.qty||1}"></td>
@@ -564,17 +584,43 @@ function addProductRow(data){
     <td class="p-total">BDT 0</td>
     <td><button class="icon-btn" title="Remove">x</button></td>
   `;
-  tr.querySelector('.icon-btn').onclick = ()=>{ tr.remove(); recalc(); };
+  const detailTr = document.createElement('tr');
+  detailTr.className = 'prod-detail-row';
+  detailTr.style.display = 'none';
+  detailTr.innerHTML = `
+    <td></td>
+    <td colspan="7" style="background:#fafcfb;">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;padding:6px 0;">
+        <div style="min-width:180px;">
+          <label style="font-size:11.5px;color:var(--muted);font-weight:600;">Supplier</label>
+          <input class="p-supplier" type="text" list="supplierDatalist" placeholder="Type or pick a supplier" style="font-size:13px;">
+        </div>
+        <div style="flex:1;min-width:220px;">
+          <label style="font-size:11.5px;color:var(--muted);font-weight:600;">Warranty proof link (Drive/Photos URL — optional)</label>
+          <input class="p-proof-link" type="text" placeholder="Paste a link to the scanned supplier bill/warranty card" style="font-size:13px;">
+        </div>
+      </div>
+    </td>
+  `;
+  tr.querySelector('.prod-expand-btn').onclick = ()=>{
+    const open = detailTr.style.display !== 'none';
+    detailTr.style.display = open ? 'none' : 'table-row';
+    tr.querySelector('.prod-expand-btn').textContent = open ? '▸' : '▾';
+  };
+  tr.querySelector('.icon-btn[title="Remove"]').onclick = ()=>{ tr.remove(); detailTr.remove(); recalc(); };
   ['p-qty','p-price','p-name','p-model','p-warranty','p-cost'].forEach(cls=>{
     tr.querySelector('.'+cls).addEventListener('input', recalc);
   });
   document.getElementById('prodBody').appendChild(tr);
+  document.getElementById('prodBody').appendChild(detailTr);
+  if(data?.supplier){ detailTr.querySelector('.p-supplier').value = data.supplier; }
+  if(data?.proofLink){ detailTr.querySelector('.p-proof-link').value = data.proofLink; }
   recalc();
 }
 
 function recalc(){
   let subtotal = 0, totalCost = 0;
-  document.querySelectorAll('#prodBody tr').forEach(tr=>{
+  document.querySelectorAll('#prodBody tr.prod-main-row').forEach(tr=>{
     const qty = parseFloat(tr.querySelector('.p-qty').value)||0;
     const price = parseFloat(tr.querySelector('.p-price').value)||0;
     const cost = parseFloat(tr.querySelector('.p-cost').value)||0;
@@ -641,9 +687,41 @@ function getPlatform(){
   return p;
 }
 
+function renderSupplierSettingsList(){
+  const wrap = document.getElementById('supplierList');
+  wrap.innerHTML = state.suppliers.map((s,i)=>`<span class="platform-chip">${s} <button onclick="removeSupplier(${i})" title="Remove">x</button></span>`).join('');
+}
+
+function renderSupplierDatalist(){
+  const dl = document.getElementById('supplierDatalist');
+  dl.innerHTML = state.suppliers.map(s=>`<option value="${s}">`).join('');
+}
+
+window.removeSupplier = function(idx){
+  state.suppliers.splice(idx,1);
+  STORE.set('td_suppliers', state.suppliers);
+  renderSupplierSettingsList();
+  renderSupplierDatalist();
+  toast('Supplier removed');
+}
+
+function addSupplier(){
+  const input = document.getElementById('newSupplierInput');
+  const val = input.value.trim();
+  if(!val){ return; }
+  if(state.suppliers.some(s=>s.toLowerCase()===val.toLowerCase())){ toast('Already in the list'); return; }
+  state.suppliers.push(val);
+  STORE.set('td_suppliers', state.suppliers);
+  input.value='';
+  renderSupplierSettingsList();
+  renderSupplierDatalist();
+  toast('Supplier added');
+}
+
 function collectFormData(){
   const items = [];
-  document.querySelectorAll('#prodBody tr').forEach(tr=>{
+  document.querySelectorAll('#prodBody tr.prod-main-row').forEach(tr=>{
+    const detailTr = tr.nextElementSibling;
     items.push({
       name: tr.querySelector('.p-name').value || '[Product name]',
       model: tr.querySelector('.p-model').value || '-',
@@ -651,7 +729,9 @@ function collectFormData(){
       cost: parseFloat(tr.querySelector('.p-cost').value)||0,
       price: parseFloat(tr.querySelector('.p-price').value)||0,
       warranty: parseFloat(tr.querySelector('.p-warranty').value)||0,
-      warrantyUnit: tr.querySelector('.p-warranty-unit').value
+      warrantyUnit: tr.querySelector('.p-warranty-unit').value,
+      supplier: detailTr ? detailTr.querySelector('.p-supplier').value : '',
+      proofLink: detailTr ? detailTr.querySelector('.p-proof-link').value : ''
     });
   });
   const subtotal = items.reduce((s,i)=>s+i.qty*i.price,0);
@@ -720,7 +800,7 @@ function saveInvoice(){
       body: JSON.stringify({
         invoiceNo:d.invoiceNo, platform:d.platform, orderId:d.orderId, date:d.date,
         customerName:d.customerName, mobile:d.mobile, address:d.address,
-        products: d.items.map(i=>`${i.name} (${i.model}) x${i.qty} @${i.price} [cost ${i.cost}] [${i.warranty>0?i.warranty+' '+(i.warrantyUnit||"Months")+' warranty':'no warranty'}]`).join(' | '),
+        products: d.items.map(i=>`${i.name} (${i.model}) x${i.qty} @${i.price} [cost ${i.cost}] [${i.warranty>0?i.warranty+' '+(i.warrantyUnit||"Months")+' warranty':'no warranty'}]${i.supplier?` [supplier: ${i.supplier}]`:''}${i.proofLink?` [proof: ${i.proofLink}]`:''}`).join(' | '),
         subtotal:d.subtotal, deliveryCharge:d.delivery, grandTotal:d.grand,
         totalCost:d.totalCost, deliveryCostPaid:d.deliveryCostPaid,
         packagingCost:d.packagingCost, transportCost:d.transportCost, freelancerFee:d.freelancerFee, profit:d.profit
@@ -830,9 +910,9 @@ function renderHistory(){
       }).join('')}
     </td></tr>`;
   }).join('');
-  wrap.innerHTML = `<table class="hist-table">
+  wrap.innerHTML = `<div style="overflow-x:auto;"><table class="hist-table">
     <thead><tr><th>Invoice No</th><th>Platform</th><th>Order ID</th><th>Date</th><th>Customer</th><th>Total</th><th>Profit</th><th>Warranty</th><th></th></tr></thead>
-    <tbody>${rows}</tbody></table>`;
+    <tbody>${rows}</tbody></table></div>`;
 }
 
 window.toggleDetail = function(idx){
@@ -858,7 +938,7 @@ function exportCsv(){
   const header = ['Invoice No','Platform','Order ID','Date','Customer Name','Mobile','Address','Products','Subtotal','Delivery Charge','Grand Total','Total Cost','Delivery Cost Paid','Packaging Cost','Transport Cost','Freelancer Fee','Profit'];
   const rows = state.invoices.map(d=>[
     d.invoiceNo, d.platform, d.orderId, d.date, d.customerName, d.mobile, d.address,
-    d.items.map(i=>`${i.name} (${i.model}) x${i.qty} @${i.price} [cost ${i.cost}] [${i.warranty>0?i.warranty+' '+(i.warrantyUnit||"Months")+' warranty':'no warranty'}]`).join(' | '),
+    d.items.map(i=>`${i.name} (${i.model}) x${i.qty} @${i.price} [cost ${i.cost}] [${i.warranty>0?i.warranty+' '+(i.warrantyUnit||"Months")+' warranty':'no warranty'}]${i.supplier?` [supplier: ${i.supplier}]`:''}${i.proofLink?` [proof: ${i.proofLink}]`:''}`).join(' | '),
     d.subtotal, d.delivery, d.grand, d.totalCost, d.deliveryCostPaid, d.packagingCost, d.transportCost, d.freelancerFee, d.profit
   ]);
   const csv = [header, ...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\\n');
@@ -908,7 +988,51 @@ window.deleteExpense = function(idx){
   renderExpenses();
 }
 
+function renderMonthlySummary(){
+  const wrap = document.getElementById('monthlyWrap');
+  const months = {};
+  function getMonth(dateStr){
+    if(!dateStr) return 'Unknown';
+    const d = new Date(dateStr);
+    if(isNaN(d)) return 'Unknown';
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  }
+  state.invoices.forEach(inv=>{
+    const m = getMonth(inv.date);
+    if(!months[m]) months[m] = { revenue:0, orderProfit:0, orderCosts:0, officeExp:0 };
+    months[m].revenue += inv.grand;
+    months[m].orderProfit += (inv.profit||0);
+    months[m].orderCosts += (inv.packagingCost||0)+(inv.transportCost||0)+(inv.freelancerFee||0)+(inv.deliveryCostPaid||0);
+  });
+  state.expenses.forEach(exp=>{
+    const m = getMonth(exp.date);
+    if(!months[m]) months[m] = { revenue:0, orderProfit:0, orderCosts:0, officeExp:0 };
+    months[m].officeExp += exp.amount;
+  });
+  const keys = Object.keys(months).sort().reverse();
+  if(!keys.length){
+    wrap.innerHTML = `<div class="empty-state"><div>No data yet</div>Save invoices or log expenses to see monthly totals.</div>`;
+    return;
+  }
+  const rows = keys.map(m=>{
+    const s = months[m];
+    const net = s.orderProfit - s.officeExp;
+    return `<tr>
+      <td>${m}</td>
+      <td style="text-align:right;">${fmtMoney(s.revenue)}</td>
+      <td style="text-align:right;">${fmtMoney(s.orderCosts)}</td>
+      <td style="text-align:right;">${fmtMoney(s.orderProfit)}</td>
+      <td style="text-align:right;">${fmtMoney(s.officeExp)}</td>
+      <td style="text-align:right;font-weight:700;color:var(--green);">${fmtMoney(net)}</td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML = `<div style="overflow-x:auto;"><table class="hist-table">
+    <thead><tr><th>Month</th><th style="text-align:right;">Revenue</th><th style="text-align:right;">Order Costs</th><th style="text-align:right;">Order Profit</th><th style="text-align:right;">Office Expenses</th><th style="text-align:right;">Net Profit</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
 function renderExpenses(){
+  renderMonthlySummary();
   const wrap = document.getElementById('expensesWrap');
   const officeTotal = state.expenses.reduce((s,e)=>s+e.amount,0);
   if(!state.expenses.length){
@@ -1000,9 +1124,9 @@ function renderCustomers(){
       `).join('')}
     </td></tr>
   `).join('');
-  wrap.innerHTML = `<table class="hist-table">
+  wrap.innerHTML = `<div style="overflow-x:auto;"><table class="hist-table">
     <thead><tr><th>Customer</th><th>Mobile</th><th>Address</th><th>Orders</th><th>Total Spent</th><th>Last Order</th><th></th></tr></thead>
-    <tbody>${rows}</tbody></table>`;
+    <tbody>${rows}</tbody></table></div>`;
 }
 
 window.toggleCustomerOrders = function(ci){
@@ -1054,6 +1178,8 @@ function init(){
   if(webhook && webhook.url){ state.webhookUrl = webhook.url; }
   const platforms = STORE.get('td_platforms');
   if(platforms && platforms.length){ state.platforms = platforms; }
+  const suppliers = STORE.get('td_suppliers');
+  if(suppliers){ state.suppliers = suppliers; }
 
   document.getElementById('set_bizName').value = state.bizName;
   document.getElementById('set_bizPhone').value = state.bizPhone;
@@ -1065,7 +1191,11 @@ function init(){
   updateSyncBadge();
   renderPlatformSelect();
   renderPlatformSettingsList();
+  renderSupplierSettingsList();
+  renderSupplierDatalist();
   document.getElementById('addPlatformBtn').onclick = addPlatform;
+  document.getElementById('addSupplierBtn').onclick = addSupplier;
+  document.getElementById('newSupplierInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addSupplier(); });
   document.getElementById('addExpenseBtn').onclick = addExpense;
   document.getElementById('exportExpensesBtn').onclick = exportExpensesCsv;
   document.getElementById('expDate').valueAsDate = new Date();
