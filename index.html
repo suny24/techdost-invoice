@@ -150,6 +150,27 @@
     #invoiceSheet{padding:22px 16px;}
     #invoiceSheet table.items th, #invoiceSheet table.items td{padding:6px 6px;font-size:12px;}
     .inv-title h2{font-size:22px;}
+
+    .prod-table thead{display:none;}
+    .prod-table, .prod-table tbody, .prod-table tr, .prod-table td{display:block;width:100% !important;}
+    .prod-table{min-width:0 !important;}
+    .prod-table tr.prod-main-row{
+      border:1px solid var(--border);border-radius:12px;margin-bottom:12px;padding:10px 12px 4px;background:#fff;
+    }
+    .prod-table tr.prod-detail-row{margin-top:-10px;margin-bottom:12px;}
+    .prod-table tr.prod-detail-row td{padding:0;}
+    .prod-table td{padding:6px 0;border-bottom:none;}
+    .prod-table td[data-label]:not([data-label=""])::before{
+      content: attr(data-label);
+      display:block;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;
+    }
+    .prod-table td input, .prod-table td select{width:100%;}
+    .prod-table td[data-label="More"], .prod-table td[data-label="Remove"]{
+      display:inline-block;width:auto !important;padding:6px 10px 6px 0;
+    }
+    .prod-table td[data-label="More"] button, .prod-table td[data-label="Remove"] button{
+      border:1px solid var(--border);border-radius:8px;padding:6px 12px;background:#fff;
+    }
   }
 </style>
 </head>
@@ -659,13 +680,13 @@ function addProductRow(data){
   const tr = document.createElement('tr');
   tr.className = 'prod-main-row';
   tr.innerHTML = `
-    <td><button type="button" class="icon-btn prod-expand-btn" title="Supplier & warranty proof" style="color:var(--teal-mid);font-size:14px;">▸</button></td>
-    <td><input class="p-name" type="text" list="productDatalist" placeholder="Product name" value="${data?.name||''}"></td>
-    <td><input class="p-model" type="text" placeholder="Model/Serial" value="${data?.model||''}"></td>
-    <td><input class="p-qty" type="number" min="1" value="${data?.qty||1}"></td>
-    <td><input class="p-cost" type="number" min="0" value="${data?.cost||0}" style="background:#fdf6e9;" title="Your purchase cost — internal only, never printed on the customer invoice"></td>
-    <td><input class="p-price" type="number" min="0" value="${data?.price||0}"></td>
-    <td>
+    <td data-label="More"><button type="button" class="icon-btn prod-expand-btn" title="Supplier & warranty proof" style="color:var(--teal-mid);font-size:14px;">▸</button></td>
+    <td data-label="Product"><input class="p-name" type="text" list="productDatalist" placeholder="Product name" value="${data?.name||''}"></td>
+    <td data-label="Model/Serial"><input class="p-model" type="text" placeholder="Model/Serial" value="${data?.model||''}"></td>
+    <td data-label="Qty"><input class="p-qty" type="number" min="1" value="${data?.qty||1}"></td>
+    <td data-label="Cost price"><input class="p-cost" type="number" min="0" value="${data?.cost||0}" style="background:#fdf6e9;" title="Your purchase cost — internal only, never printed on the customer invoice"></td>
+    <td data-label="Sell price"><input class="p-price" type="number" min="0" value="${data?.price||0}"></td>
+    <td data-label="Warranty">
       <div style="display:flex;gap:4px;">
         <input class="p-warranty" type="number" min="0" style="width:52px;" value="${data?.warranty!==undefined?data.warranty:0}">
         <select class="p-warranty-unit" style="padding:9px 2px;font-size:12px;">
@@ -674,8 +695,8 @@ function addProductRow(data){
         </select>
       </div>
     </td>
-    <td class="p-total">BDT 0</td>
-    <td><button class="icon-btn" title="Remove">x</button></td>
+    <td class="p-total" data-label="Total">BDT 0</td>
+    <td data-label="Remove"><button class="icon-btn" title="Remove">✕</button></td>
   `;
   const detailTr = document.createElement('tr');
   detailTr.className = 'prod-detail-row';
