@@ -1472,9 +1472,9 @@ function parseProductsString(str){
   });
 }
 
-function syncFromSheet(){
-  if(!state.webhookUrl){ toast('Set up Google Sheet sync first'); return; }
-  toast('Loading from Sheet...');
+function syncFromSheet(silent){
+  if(!state.webhookUrl){ if(!silent) toast('Set up Google Sheet sync first'); return; }
+  if(!silent) toast('Loading from Sheet...');
   fetch(state.webhookUrl, { method:'GET' })
     .then(r=>r.json())
     .then(data=>{
@@ -1512,10 +1512,12 @@ function syncFromSheet(){
       });
       STORE.set('td_invoices', state.invoices);
       STORE.set('td_expenses', state.expenses);
-      renderHistory(); renderCustomers(); renderExpenses();
-      toast(`Loaded ${addedInvoices} invoice(s), ${addedExpenses} expense(s) from Sheet`);
+      renderHistory(); renderCustomers(); renderExpenses(); renderSupplierLedger();
+      if(!silent || addedInvoices || addedExpenses){
+        toast(`Loaded ${addedInvoices} invoice(s), ${addedExpenses} expense(s) from Sheet`);
+      }
     })
-    .catch(()=>toast('Could not load from Sheet — check the URL and your connection'));
+    .catch(()=>{ if(!silent) toast('Could not load from Sheet — check the URL and your connection'); });
 }
 
 function switchTab(tab){
@@ -1530,6 +1532,9 @@ function switchTab(tab){
   if(tab==='customers') renderCustomers();
   if(tab==='suppliers') renderSupplierLedger();
   if(tab==='expenses') renderExpenses();
+  if(['history','customers','suppliers','expenses'].includes(tab) && state.webhookUrl){
+    syncFromSheet(true);
+  }
 }
 
 function updateSyncBadge(){
