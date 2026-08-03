@@ -180,6 +180,7 @@
       <button class="tab-btn active" data-tab="create">New invoice</button>
       <button class="tab-btn" data-tab="history">History</button>
       <button class="tab-btn" data-tab="customers">Customers</button>
+      <button class="tab-btn" data-tab="suppliers">Suppliers</button>
       <button class="tab-btn" data-tab="expenses">Expenses</button>
       <button class="tab-btn" data-tab="settings">Settings</button>
     </div>
@@ -392,6 +393,15 @@
     </div>
   </div>
 
+  <!-- ============ SUPPLIERS TAB ============ -->
+  <div id="tab-suppliers" class="tab-content" style="display:none;">
+    <div class="card">
+      <h2>Supplier ledger</h2>
+      <p class="settings-note">Grouped from the Supplier field on each product line — total spent, items bought, and last purchase per supplier.</p>
+      <div id="supplierLedgerWrap" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
   <!-- ============ EXPENSES TAB ============ -->
   <div id="tab-expenses" class="tab-content" style="display:none;">
     <div class="card">
@@ -480,6 +490,12 @@
         <input id="newSupplierInput" type="text" placeholder="e.g. Agrabad Toner House" style="max-width:260px;">
         <button class="btn btn-secondary" id="addSupplierBtn">+ Add supplier</button>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Supplier ledger</h2>
+      <p class="settings-note">Auto-built from every product you've bought and logged against a supplier — total spent, items, and which invoice each purchase belongs to.</p>
+      <div id="supplierLedgerWrap" style="margin-top:12px;"></div>
     </div>
 
     <div class="card">
@@ -805,6 +821,54 @@ function addSupplier(){
   renderSupplierSettingsList();
   renderSupplierDatalist();
   toast('Supplier added');
+}
+
+function renderSupplierLedger(){
+  const wrap = document.getElementById('supplierLedgerWrap');
+  const groups = {};
+  state.invoices.forEach(inv=>{
+    inv.items.forEach(it=>{
+      const supplier = (it.supplier||'').trim();
+      if(!supplier) return;
+      if(!groups[supplier]) groups[supplier] = { items:0, totalCost:0, lastDate:inv.date, purchases:[] };
+      const g = groups[supplier];
+      g.items += it.qty;
+      g.totalCost += it.qty*it.cost;
+      if(new Date(inv.date) > new Date(g.lastDate)) g.lastDate = inv.date;
+      g.purchases.push({ invoiceNo:inv.invoiceNo, date:inv.date, name:it.name, model:it.model, qty:it.qty, cost:it.cost, proofLink:it.proofLink });
+    });
+  });
+  const names = Object.keys(groups).sort((a,b)=>groups[b].totalCost-groups[a].totalCost);
+  if(!names.length){
+    wrap.innerHTML = `<div class="empty-state"><div>No purchases logged yet</div>Add a supplier name in a product's details panel to see it here.</div>`;
+    return;
+  }
+  const rows = names.map((name,si)=>{
+    const g = groups[name];
+    return `<tr>
+      <td>${name}</td>
+      <td>${g.items}</td>
+      <td>${fmtMoney(g.totalCost)}</td>
+      <td>${g.lastDate}</td>
+      <td><button class="btn btn-ghost" onclick="toggleSupplierLedger(${si})">Purchases</button></td>
+    </tr>
+    <tr class="item-detail-row" id="supplier-ledger-${si}" style="display:none;"><td colspan="5">
+      ${g.purchases.slice().reverse().map(p=>`
+        <div class="idr-item">
+          <span><b>${p.invoiceNo}</b> — ${p.name} (${p.model}) x${p.qty} — ${p.date}${p.proofLink?` · <a href="${p.proofLink}" target="_blank" rel="noopener">proof</a>`:''}</span>
+          <span>${fmtMoney(p.qty*p.cost)}</span>
+        </div>
+      `).join('')}
+    </td></tr>`;
+  }).join('');
+  wrap.innerHTML = `<div style="overflow-x:auto;"><table class="hist-table">
+    <thead><tr><th>Supplier</th><th>Items Bought</th><th>Total Spent</th><th>Last Purchase</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+window.toggleSupplierLedger = function(si){
+  const row = document.getElementById('supplier-ledger-'+si);
+  row.style.display = row.style.display==='none' ? 'table-row' : 'none';
 }
 
 function renderProductTemplateList(){
@@ -1438,10 +1502,12 @@ function switchTab(tab){
   document.getElementById('tab-create').style.display = tab==='create' ? 'block':'none';
   document.getElementById('tab-history').style.display = tab==='history' ? 'block':'none';
   document.getElementById('tab-customers').style.display = tab==='customers' ? 'block':'none';
+  document.getElementById('tab-suppliers').style.display = tab==='suppliers' ? 'block':'none';
   document.getElementById('tab-expenses').style.display = tab==='expenses' ? 'block':'none';
   document.getElementById('tab-settings').style.display = tab==='settings' ? 'block':'none';
   if(tab==='history') renderHistory();
   if(tab==='customers') renderCustomers();
+  if(tab==='suppliers') renderSupplierLedger();
   if(tab==='expenses') renderExpenses();
 }
 
@@ -1582,6 +1648,7 @@ function init(){
 
   resetForm();
   renderHistory();
+  renderSupplierLedger();
 }
 
 async function hashPassword(pw){
