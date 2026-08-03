@@ -136,6 +136,7 @@
     .signature-row{margin:18px 0 12px;}
     .inv-header, .inv-meta-grid{flex-direction:row !important;}
     .inv-title{text-align:right !important;}
+    .items-scroll{overflow:visible !important;}
     *{
       -webkit-print-color-adjust:exact !important;
       print-color-adjust:exact !important;
@@ -146,6 +147,9 @@
     .grid, .grid3{grid-template-columns:1fr;}
     .inv-header, .inv-meta-grid{flex-direction:column;gap:10px;}
     .inv-title{text-align:left;}
+    #invoiceSheet{padding:22px 16px;}
+    #invoiceSheet table.items th, #invoiceSheet table.items td{padding:6px 6px;font-size:12px;}
+    .inv-title h2{font-size:22px;}
   }
 </style>
 </head>
@@ -227,14 +231,17 @@
 
     <div class="card no-print">
       <h2><span class="num">3</span> Products</h2>
-      <table class="prod-table">
+      <div style="overflow-x:auto;">
+      <table class="prod-table" style="min-width:760px;">
         <thead>
           <tr><th style="width:28px;"></th><th>Product</th><th style="width:130px;">Model/Serial</th><th style="width:60px;">Qty</th><th style="width:95px;">Cost price</th><th style="width:95px;">Sell price</th><th style="width:135px;">Warranty</th><th style="width:100px;">Total</th><th></th></tr>
         </thead>
         <tbody id="prodBody"></tbody>
       </table>
+      </div>
       <button class="add-row-btn" id="addRowBtn">+ Add product</button>
       <datalist id="supplierDatalist"></datalist>
+      <datalist id="productDatalist"></datalist>
       <p class="settings-note">Choose Days or Months for warranty (e.g. 15 Days for short warranties). Set warranty to 0 for products with no warranty. Cost price (highlighted) is what you paid the supplier — it's for your own profit tracking only and never appears on the printed customer invoice.</p>
     </div>
 
@@ -325,10 +332,12 @@
         <div id="pv_custMobile">Mobile: —</div>
         <div id="pv_custAddress">Address: —</div>
       </div>
+      <div style="overflow-x:auto;" class="items-scroll">
       <table class="items">
         <thead><tr><th>#</th><th>Product</th><th>Model/Serial</th><th>Qty</th><th>Price</th><th>Warranty</th><th>Total</th></tr></thead>
         <tbody id="pv_items"></tbody>
       </table>
+      </div>
       <div class="inv-totals">
         <table>
           <tr><td>Subtotal</td><td style="text-align:right;" id="pv_subtotal">BDT 0</td></tr>
@@ -393,6 +402,7 @@
     <div class="card">
       <h2>Monthly reconciliation</h2>
       <p class="settings-note">Revenue, costs, and profit broken down by month — for matching your books at month/year end.</p>
+      <div id="profitChartWrap" style="margin:14px 0;"></div>
       <div id="monthlyWrap" style="margin-top:12px;"></div>
     </div>
 
@@ -473,6 +483,24 @@
     </div>
 
     <div class="card">
+      <h2>Product templates</h2>
+      <p class="settings-note">Save products you sell often — when you type a matching name in a new invoice, cost/price/warranty auto-fill.</p>
+      <div class="grid3">
+        <div class="field"><label>Product name</label><input id="pt_name" type="text" placeholder="e.g. HP 680 Toner Cartridge"></div>
+        <div class="field"><label>Cost price</label><input id="pt_cost" type="number" min="0" value="0"></div>
+        <div class="field"><label>Sell price</label><input id="pt_price" type="number" min="0" value="0"></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label>Warranty</label><input id="pt_warranty" type="number" min="0" value="0"></div>
+        <div class="field"><label>Warranty unit</label>
+          <select id="pt_warrantyUnit"><option>Months</option><option>Days</option></select>
+        </div>
+        <div class="field"><label>&nbsp;</label><button class="btn btn-secondary" id="addProductTemplateBtn" style="width:100%;">+ Save template</button></div>
+      </div>
+      <div id="productTemplateList" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card">
       <h2>Invoice number format</h2>
       <div class="grid3">
         <div class="field"><label>Prefix</label><input id="set_prefix" type="text" value="TD"></div>
@@ -517,6 +545,29 @@
   return ContentService.createTextOutput(JSON.stringify({status:"success"}))
     .setMimeType(ContentService.MimeType.JSON);
 }
+
+function doGet(e) {
+  function sheetToObjects(name) {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+    if (!sheet) return [];
+    var values = sheet.getDataRange().getValues();
+    if (values.length < 2) return [];
+    var headers = values[0];
+    var rows = [];
+    for (var i = 1; i < values.length; i++) {
+      var obj = {};
+      for (var j = 0; j < headers.length; j++) { obj[headers[j]] = values[i][j]; }
+      rows.push(obj);
+    }
+    return rows;
+  }
+  var out = {
+    invoices: sheetToObjects("Invoices"),
+    expenses: sheetToObjects("Expenses")
+  };
+  return ContentService.createTextOutput(JSON.stringify(out))
+    .setMimeType(ContentService.MimeType.JSON);
+}
       </div>
       <div class="steps-box" style="margin-top:12px;">
         <div><b>Step 2</b> — Click Deploy → New deployment → Web app. Set "Execute as: Me" and "Who has access: Anyone", then deploy.</div>
@@ -529,8 +580,21 @@
       <div class="row-actions">
         <button class="btn btn-primary" id="saveWebhookBtn">Save</button>
         <button class="btn btn-ghost" id="testWebhookBtn">Send test row</button>
+        <button class="btn btn-secondary" id="syncFromSheetBtn">⬇ Load history from Sheet</button>
       </div>
-      <p class="settings-note">Without a URL, invoices still save on this device and you can export CSV anytime from History.</p>
+      <p class="settings-note">Without a URL, invoices still save on this device and you can export CSV anytime from History. "Load history from Sheet" pulls in any invoices/expenses saved from other devices, so History and Customers stay complete wherever you open this tool.</p>
+    </div>
+
+    <div class="card">
+      <h2>Full data backup</h2>
+      <p class="settings-note">Save everything (invoices, expenses, platforms, suppliers, settings) as one file — useful before clearing browser data, or to move to a new device/browser.</p>
+      <div class="row-actions">
+        <button class="btn btn-secondary" id="exportBackupBtn">⬇ Export backup (JSON)</button>
+        <label class="btn btn-ghost" style="cursor:pointer;">⬆ Import backup (JSON)
+          <input id="importBackupInput" type="file" accept="application/json" style="display:none;">
+        </label>
+      </div>
+      <p class="settings-note" style="color:var(--danger);">Importing replaces all current data on this device — export a backup first if unsure.</p>
     </div>
 
     <div class="card">
@@ -562,6 +626,7 @@ let state = {
   webhookUrl:"",
   platforms: ["Facebook","Daraz","Personal","WhatsApp","Website"],
   suppliers: [],
+  productTemplates: [],
   invoices: [],
   expenses: []
 };
@@ -579,7 +644,7 @@ function addProductRow(data){
   tr.className = 'prod-main-row';
   tr.innerHTML = `
     <td><button type="button" class="icon-btn prod-expand-btn" title="Supplier & warranty proof" style="color:var(--teal-mid);font-size:14px;">▸</button></td>
-    <td><input class="p-name" type="text" placeholder="Product name" value="${data?.name||''}"></td>
+    <td><input class="p-name" type="text" list="productDatalist" placeholder="Product name" value="${data?.name||''}"></td>
     <td><input class="p-model" type="text" placeholder="Model/Serial" value="${data?.model||''}"></td>
     <td><input class="p-qty" type="number" min="1" value="${data?.qty||1}"></td>
     <td><input class="p-cost" type="number" min="0" value="${data?.cost||0}" style="background:#fdf6e9;" title="Your purchase cost — internal only, never printed on the customer invoice"></td>
@@ -622,6 +687,18 @@ function addProductRow(data){
   tr.querySelector('.icon-btn[title="Remove"]').onclick = ()=>{ tr.remove(); detailTr.remove(); recalc(); };
   ['p-qty','p-price','p-name','p-model','p-warranty','p-cost'].forEach(cls=>{
     tr.querySelector('.'+cls).addEventListener('input', recalc);
+  });
+  tr.querySelector('.p-name').addEventListener('change', function(){
+    const match = state.productTemplates.find(t=>t.name.toLowerCase()===this.value.trim().toLowerCase());
+    if(match){
+      const costEl = tr.querySelector('.p-cost'), priceEl = tr.querySelector('.p-price'), wEl = tr.querySelector('.p-warranty'), wuEl = tr.querySelector('.p-warranty-unit');
+      if(!parseFloat(costEl.value)) costEl.value = match.cost;
+      if(!parseFloat(priceEl.value)) priceEl.value = match.price;
+      wEl.value = match.warranty;
+      wuEl.value = match.warrantyUnit;
+      recalc();
+      toast('Filled from saved template: '+match.name);
+    }
   });
   document.getElementById('prodBody').appendChild(tr);
   document.getElementById('prodBody').appendChild(detailTr);
@@ -728,6 +805,49 @@ function addSupplier(){
   renderSupplierSettingsList();
   renderSupplierDatalist();
   toast('Supplier added');
+}
+
+function renderProductTemplateList(){
+  const wrap = document.getElementById('productTemplateList');
+  if(!state.productTemplates.length){ wrap.innerHTML=''; return; }
+  wrap.innerHTML = state.productTemplates.map((t,i)=>
+    `<span class="platform-chip">${t.name} (${fmtMoney(t.price)}) <button onclick="removeProductTemplate(${i})" title="Remove">x</button></span>`
+  ).join('');
+}
+
+function renderProductDatalist(){
+  const dl = document.getElementById('productDatalist');
+  dl.innerHTML = state.productTemplates.map(t=>`<option value="${t.name}">`).join('');
+}
+
+window.removeProductTemplate = function(idx){
+  state.productTemplates.splice(idx,1);
+  STORE.set('td_product_templates', state.productTemplates);
+  renderProductTemplateList();
+  renderProductDatalist();
+  toast('Template removed');
+}
+
+function addProductTemplate(){
+  const name = document.getElementById('pt_name').value.trim();
+  if(!name){ toast('Enter a product name'); return; }
+  const t = {
+    name,
+    cost: parseFloat(document.getElementById('pt_cost').value)||0,
+    price: parseFloat(document.getElementById('pt_price').value)||0,
+    warranty: parseFloat(document.getElementById('pt_warranty').value)||0,
+    warrantyUnit: document.getElementById('pt_warrantyUnit').value
+  };
+  const existingIdx = state.productTemplates.findIndex(x=>x.name.toLowerCase()===name.toLowerCase());
+  if(existingIdx>=0){ state.productTemplates[existingIdx] = t; } else { state.productTemplates.push(t); }
+  STORE.set('td_product_templates', state.productTemplates);
+  document.getElementById('pt_name').value='';
+  document.getElementById('pt_cost').value=0;
+  document.getElementById('pt_price').value=0;
+  document.getElementById('pt_warranty').value=0;
+  renderProductTemplateList();
+  renderProductDatalist();
+  toast('Template saved');
 }
 
 function collectFormData(){
@@ -938,6 +1058,24 @@ window.reprint = function(idx){
   renderPreview(d);
   window.scrollTo({top: document.getElementById('invoiceSheet').offsetTop-20, behavior:'smooth'});
 }
+window.reorderInvoice = function(idx){
+  const d = state.invoices[idx];
+  document.querySelector('.tab-btn[data-tab="create"]').click();
+  resetForm();
+  document.getElementById('custName').value = d.customerName;
+  document.getElementById('custMobile').value = d.mobile;
+  document.getElementById('custAddress').value = d.address;
+  document.getElementById('platform').value = state.platforms.includes(d.platform) ? d.platform : 'Other';
+  if(!state.platforms.includes(d.platform)){
+    document.getElementById('customPlatformField').style.display='block';
+    document.getElementById('customPlatform').value = d.platform;
+  }
+  document.getElementById('prodBody').innerHTML = '';
+  d.items.forEach(it=>addProductRow({name:it.name, model:it.model, qty:it.qty, cost:it.cost, price:it.price, warranty:it.warranty, warrantyUnit:it.warrantyUnit, supplier:it.supplier, proofLink:it.proofLink}));
+  recalc();
+  toast('Pre-filled from previous order — review and Save');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
 window.deleteInvoice = function(idx){
   if(!confirm('Delete this invoice?')) return;
   state.invoices.splice(idx,1);
@@ -1031,10 +1169,35 @@ function renderMonthlySummary(){
     months[m].officeExp += exp.amount;
   });
   const keys = Object.keys(months).sort().reverse();
+  const chartWrap = document.getElementById('profitChartWrap');
   if(!keys.length){
+    chartWrap.innerHTML = '';
     wrap.innerHTML = `<div class="empty-state"><div>No data yet</div>Save invoices or log expenses to see monthly totals.</div>`;
     return;
   }
+  const chartKeys = keys.slice(0,12).reverse();
+  const netValues = chartKeys.map(m=>months[m].orderProfit - months[m].officeExp);
+  const maxAbs = Math.max(1, ...netValues.map(v=>Math.abs(v)));
+  const baseline = 45;
+  const maxBarH = 35;
+  const barW = 100/chartKeys.length;
+  const bars = chartKeys.map((m,i)=>{
+    const v = netValues[i];
+    const h = Math.abs(v)/maxAbs*maxBarH;
+    const isNeg = v<0;
+    const x = i*barW + barW*0.15;
+    const w = barW*0.7;
+    const y = isNeg ? baseline : baseline-h;
+    const color = isNeg ? 'var(--danger)' : 'var(--green)';
+    return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" fill="${color}" rx="1"></rect>
+      <text x="${(i*barW+barW*0.5).toFixed(2)}" y="58" font-size="3.2" text-anchor="middle" fill="#6b7c77">${m.slice(2)}</text>`;
+  }).join('');
+  chartWrap.innerHTML = `
+    <div style="font-size:12px;color:var(--muted);font-weight:600;margin-bottom:4px;">Net profit trend (last ${chartKeys.length} month${chartKeys.length>1?'s':''})</div>
+    <svg viewBox="0 0 100 60" style="width:100%;height:140px;" preserveAspectRatio="none">
+      <line x1="0" y1="${baseline}" x2="100" y2="${baseline}" stroke="#d8e4e0" stroke-width="0.4"></line>
+      ${bars}
+    </svg>`;
   const rows = keys.map(m=>{
     const s = months[m];
     const net = s.orderProfit - s.officeExp;
@@ -1140,7 +1303,7 @@ function renderCustomers(){
       ${c.orderList.slice().reverse().map(o=>`
         <div class="idr-item">
           <span><b>${o.invoiceNo}</b> — ${o.platform}${o.orderId&&o.orderId!=='-'?' · Order ID: '+o.orderId:''} — ${o.date}</span>
-          <span>${fmtMoney(o.grand)} &nbsp; <button class="btn btn-secondary" style="padding:3px 10px;font-size:11.5px;" onclick="reprint(${o.idx})">Preview</button></span>
+          <span>${fmtMoney(o.grand)} &nbsp; <button class="btn btn-secondary" style="padding:3px 10px;font-size:11.5px;" onclick="reprint(${o.idx})">Preview</button> <button class="btn btn-primary" style="padding:3px 10px;font-size:11.5px;" onclick="reorderInvoice(${o.idx})">Reorder</button></span>
         </div>
       `).join('')}
     </td></tr>
@@ -1166,6 +1329,108 @@ function exportExpensesCsv(){
   a.href = url; a.download = 'techdost_office_expenses.csv'; a.click();
   URL.revokeObjectURL(url);
   toast('CSV downloaded');
+}
+
+function exportBackup(){
+  const backup = {
+    business: STORE.get('td_business'),
+    counter: STORE.get('td_counter'),
+    webhook: STORE.get('td_webhook'),
+    platforms: state.platforms,
+    suppliers: state.suppliers,
+    productTemplates: state.productTemplates,
+    invoices: state.invoices,
+    expenses: state.expenses,
+    exportedAt: new Date().toISOString()
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'techdost_backup_'+new Date().toISOString().slice(0,10)+'.json'; a.click();
+  URL.revokeObjectURL(url);
+  toast('Backup downloaded');
+}
+
+function importBackup(file){
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const data = JSON.parse(e.target.result);
+      if(!confirm('This will replace all current data on this device with the backup file. Continue?')) return;
+      if(data.business) STORE.set('td_business', data.business);
+      if(data.counter) STORE.set('td_counter', data.counter);
+      if(data.webhook) STORE.set('td_webhook', data.webhook);
+      if(data.platforms) STORE.set('td_platforms', data.platforms);
+      if(data.suppliers) STORE.set('td_suppliers', data.suppliers);
+      if(data.productTemplates) STORE.set('td_product_templates', data.productTemplates);
+      if(data.invoices) STORE.set('td_invoices', data.invoices);
+      if(data.expenses) STORE.set('td_expenses', data.expenses);
+      toast('Backup restored — reloading...');
+      setTimeout(()=>location.reload(), 1200);
+    }catch(err){
+      toast('Invalid backup file');
+    }
+  };
+  reader.readAsText(file);
+}
+
+function parseProductsString(str){
+  if(!str) return [];
+  return str.split(' | ').map(seg=>{
+    const m = seg.match(/^(.*?) \((.*?)\) x([\d.]+) @([\d.]+) \[cost ([\d.]+)\] \[(?:(\d+) (Months|Days) warranty|no warranty)\](?: \[supplier: (.*?)\])?(?: \[proof: (.*?)\])?$/);
+    if(!m){ return { name: seg, model:'-', qty:1, price:0, cost:0, warranty:0, warrantyUnit:'Months', supplier:'', proofLink:'' }; }
+    return {
+      name: m[1], model: m[2], qty: parseFloat(m[3])||0, price: parseFloat(m[4])||0, cost: parseFloat(m[5])||0,
+      warranty: m[6] ? parseFloat(m[6]) : 0, warrantyUnit: m[7] || 'Months',
+      supplier: m[8] || '', proofLink: m[9] || ''
+    };
+  });
+}
+
+function syncFromSheet(){
+  if(!state.webhookUrl){ toast('Set up Google Sheet sync first'); return; }
+  toast('Loading from Sheet...');
+  fetch(state.webhookUrl, { method:'GET' })
+    .then(r=>r.json())
+    .then(data=>{
+      let addedInvoices = 0, addedExpenses = 0;
+      const existingInvoiceNos = new Set(state.invoices.map(i=>i.invoiceNo));
+      (data.invoices||[]).forEach(row=>{
+        const invoiceNo = row["Invoice No"];
+        if(!invoiceNo || existingInvoiceNos.has(invoiceNo)) return;
+        const items = parseProductsString(row["Products"]);
+        state.invoices.push({
+          invoiceNo, platform: row["Platform"]||'-', orderId: row["Order ID"]||'-',
+          date: row["Date"] instanceof Date ? row["Date"].toISOString().slice(0,10) : String(row["Date"]||''),
+          customerName: row["Customer Name"]||'-', mobile: String(row["Mobile"]||'-'), address: row["Address"]||'-',
+          items,
+          subtotal: parseFloat(row["Subtotal"])||0, delivery: parseFloat(row["Delivery Charge"])||0,
+          grand: parseFloat(row["Grand Total"])||0, totalCost: parseFloat(row["Total Cost"])||0,
+          deliveryCostPaid: parseFloat(row["Delivery Cost Paid"])||0, packagingCost: parseFloat(row["Packaging Cost"])||0,
+          transportCost: parseFloat(row["Transport Cost"])||0, freelancerFee: parseFloat(row["Freelancer Fee"])||0,
+          profit: parseFloat(row["Profit"])||0
+        });
+        existingInvoiceNos.add(invoiceNo);
+        addedInvoices++;
+      });
+      const existingExpenseKeys = new Set(state.expenses.map(e=>`${e.date}|${e.category}|${e.amount}|${e.note}`));
+      (data.expenses||[]).forEach(row=>{
+        const date = row["Date"] instanceof Date ? row["Date"].toISOString().slice(0,10) : String(row["Date"]||'');
+        const category = row["Category"]||'Other';
+        const amount = parseFloat(row["Amount"])||0;
+        const note = row["Note"]||'';
+        const key = `${date}|${category}|${amount}|${note}`;
+        if(existingExpenseKeys.has(key)) return;
+        state.expenses.push({ date, category, amount, note });
+        existingExpenseKeys.add(key);
+        addedExpenses++;
+      });
+      STORE.set('td_invoices', state.invoices);
+      STORE.set('td_expenses', state.expenses);
+      renderHistory(); renderCustomers(); renderExpenses();
+      toast(`Loaded ${addedInvoices} invoice(s), ${addedExpenses} expense(s) from Sheet`);
+    })
+    .catch(()=>toast('Could not load from Sheet — check the URL and your connection'));
 }
 
 function switchTab(tab){
@@ -1201,6 +1466,8 @@ function init(){
   if(platforms && platforms.length){ state.platforms = platforms; }
   const suppliers = STORE.get('td_suppliers');
   if(suppliers){ state.suppliers = suppliers; }
+  const productTemplates = STORE.get('td_product_templates');
+  if(productTemplates){ state.productTemplates = productTemplates; }
 
   document.getElementById('set_bizName').value = state.bizName;
   document.getElementById('set_bizPhone').value = state.bizPhone;
@@ -1214,11 +1481,19 @@ function init(){
   renderPlatformSettingsList();
   renderSupplierSettingsList();
   renderSupplierDatalist();
+  renderProductTemplateList();
+  renderProductDatalist();
   document.getElementById('addPlatformBtn').onclick = addPlatform;
   document.getElementById('addSupplierBtn').onclick = addSupplier;
   document.getElementById('newSupplierInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addSupplier(); });
+  document.getElementById('addProductTemplateBtn').onclick = addProductTemplate;
   document.getElementById('addExpenseBtn').onclick = addExpense;
   document.getElementById('exportExpensesBtn').onclick = exportExpensesCsv;
+  document.getElementById('exportBackupBtn').onclick = exportBackup;
+  document.getElementById('syncFromSheetBtn').onclick = syncFromSheet;
+  document.getElementById('importBackupInput').addEventListener('change', function(){
+    if(this.files && this.files[0]) importBackup(this.files[0]);
+  });
   document.getElementById('expDate').valueAsDate = new Date();
   document.getElementById('newPlatformInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addPlatform(); });
 
