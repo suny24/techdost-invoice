@@ -118,8 +118,11 @@
   .inv-totals table{width:260px;font-size:13.5px;}
   .inv-totals td{padding:5px 4px;}
   .inv-totals .grand td{font-weight:700;color:var(--teal);font-size:16px;border-top:2px solid var(--teal);padding-top:8px;}
-  .warranty-box{background:var(--teal-light);border:1px solid var(--teal);border-radius:8px;padding:14px 16px;font-size:12.5px;line-height:1.7;margin-bottom:18px;}
-  .warranty-box h4{margin:0 0 6px;color:var(--teal);font-size:13.5px;}
+  .warranty-box{background:var(--teal-light);border:1px solid var(--teal);border-radius:8px;padding:14px 18px;font-size:12.5px;line-height:1.7;margin-bottom:18px;}
+  .warranty-box h4{margin:0 0 8px;color:var(--teal);font-size:13.5px;}
+  .warranty-box ul{margin:0;padding-left:20px;}
+  .warranty-box li{margin-bottom:8px;}
+  .warranty-box li:last-child{margin-bottom:0;}
   .thankyou{text-align:center;color:var(--teal);font-weight:700;font-size:14.5px;}
   .thankyou small{display:block;color:var(--muted);font-weight:400;font-size:11.5px;margin-top:3px;}
   .signature-row{display:flex;justify-content:flex-end;margin:32px 0 20px;}
@@ -139,8 +142,10 @@
     .bill-to{margin-bottom:6px;}
     #invoiceSheet table.items th, #quotationSheet table.items th, #invoiceSheet table.items td, #quotationSheet table.items td{padding:5px 8px;font-size:11.5px;}
     .inv-totals{margin-bottom:8px;}
-    .warranty-box{padding:8px 12px;margin-bottom:8px;font-size:10.5px;line-height:1.4;}
-    .warranty-box h4{font-size:12px;margin-bottom:3px;}
+    .warranty-box{padding:8px 14px;margin-bottom:8px;font-size:10.5px;line-height:1.4;}
+    .warranty-box h4{font-size:12px;margin-bottom:4px;}
+    .warranty-box ul{padding-left:16px;}
+    .warranty-box li{margin-bottom:4px;}
     .signature-row{margin:10px 0 8px;}
     .sig-line{height:26px;}
     .thankyou{font-size:12px;}
@@ -380,8 +385,14 @@
       </div>
       <div class="warranty-box" id="pv_warrantyBox">
         <h4>Warranty &amp; Return Policy</h4>
-        <div>- Warranty (if any) is listed against each product above; void if seal is broken or for physical/burn damage. Claims need this invoice + intact seal.</div>
-        <div>- Report wrong/damaged/defective items immediately with an unboxing video. Change-of-mind returns accepted within 1–3 days if unopened &amp; unused. Refunds settled within 5 working days via bKash/Nagad.</div>
+        <ul>
+          <li>Warranty period (if any) is shown against each product above.</li>
+          <li>Void for physical/burn damage, or if the seal is broken or torn.</li>
+          <li>Warranty claim requires this invoice + intact security seal.</li>
+          <li>Report wrong/damaged/defective items immediately with an unboxing video.</li>
+          <li>Change-of-mind returns accepted within 1–3 days if unopened &amp; unused.</li>
+          <li>Approved refunds settled within 5 working days via bKash/Nagad.</li>
+        </ul>
       </div>
       <div class="signature-row">
         <div class="signature-box" style="margin-left:auto;">
