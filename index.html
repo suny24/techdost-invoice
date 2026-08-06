@@ -788,6 +788,9 @@
       <div class="steps-box" style="background:#fff7e6;border-color:#f0c36d;">
         <div><b>Already set this up before?</b> — Open your existing Apps Script project, select all the old code and delete it, paste this new version in its place, then click Deploy → Manage deployments → ✎ (edit) → Version: "New version" → Deploy — <u>this last step is essential</u>; just saving the code (Ctrl+S) does NOT update your live Web App, it keeps serving the old code until you deploy a new version. The Invoices sheet is now columnar — Product, Qty, Price, Cost, Supplier, etc. are each their own column, and every product gets its own row (so multi-product invoices span a few rows sharing the same Invoice No). A "Suppliers" tab is also created automatically as a running purchase ledger. This only applies to invoices saved from now on — older rows already in the Sheet keep their old single-cell format; you can leave them or delete them.</div>
       </div>
+      <div class="steps-box" style="background:#fde8e8;border-color:#e08b8b;">
+        <div><b>If your Invoices/Expenses tab has data but no header row (row 1 is a real record, not labels like "Invoice No"):</b> that happens when the tab already existed — even empty — before the script's first run, so the header line got skipped. This is fixed in the code above. To repair a sheet already in that state: select and delete all existing rows in the affected tab (right-click the row numbers → Delete rows), redeploy the fixed code above, then in this app go to Settings → "Push local data to Sheet" to resend everything from this device with correct headers and columns.</div>
+      </div>
       <div class="steps-box">
         <div><b>What lives where:</b> "History", "Customers", and "Suppliers" inside this app are just views — built automatically from the Invoices sheet (and the auto-created Suppliers/Expenses sheets) every time a sync happens. They don't need their own separate Sheet tabs. The Suppliers sheet tab only gets rows once a product actually has a Supplier filled in; the Expenses sheet only appears once you add an expense from the Expenses tab.</div>
       </div>
@@ -799,6 +802,8 @@
     var expSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Expenses");
     if (!expSheet) {
       expSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Expenses");
+    }
+    if (expSheet.getLastRow() === 0) {
       expSheet.appendRow(["Date","Category","Note","Amount"]);
     }
     expSheet.appendRow([data.date, data.category, data.note, data.amount]);
@@ -810,6 +815,8 @@
     var qtSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Quotations");
     if (!qtSheet) {
       qtSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Quotations");
+    }
+    if (qtSheet.getLastRow() === 0) {
       qtSheet.appendRow(["Quotation No","Date","Valid Until","Client Name","Client Phone","Client Address","Items","Grand Total","Notes"]);
     }
     qtSheet.appendRow([data.qtNo, data.date, data.validUntil, data.clientName, data.clientPhone, data.clientAddress, data.items, data.grand, data.notes]);
@@ -820,6 +827,8 @@
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Invoices");
   if (!sheet) {
     sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Invoices");
+  }
+  if (sheet.getLastRow() === 0) {
     sheet.appendRow(["Invoice No","Platform","Order ID","Date","Customer Name","Mobile","Address","Product","Model","Qty","Price","Cost","Warranty","Warranty Unit","Serial","Supplier","Proof Link","Line Total","Subtotal","Delivery Charge","Grand Total","Total Cost","Delivery Cost Paid","Packaging Cost","Transport Cost","Freelancer Fee","Profit"]);
   }
 
@@ -841,6 +850,8 @@
   var supSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Suppliers");
   if (!supSheet) {
     supSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Suppliers");
+  }
+  if (supSheet.getLastRow() === 0) {
     supSheet.appendRow(["Date","Invoice No","Supplier","Product","Model","Qty","Cost/Unit","Total Cost"]);
   }
   items.forEach(function(item){
