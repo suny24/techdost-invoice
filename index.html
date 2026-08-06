@@ -786,7 +786,10 @@
         <div><b>Step 1</b> — Open a new Google Sheet, go to Extensions → Apps Script, and paste the code below.</div>
       </div>
       <div class="steps-box" style="background:#fff7e6;border-color:#f0c36d;">
-        <div><b>Already set this up before?</b> — Open your existing Apps Script project, select all the old code and delete it, paste this new version in its place, then click Deploy → Manage deployments → ✎ (edit) → Version: "New version" → Deploy. Your Web App URL stays the same, so you don't need to update it in Settings. The Invoices sheet is now columnar — Product, Qty, Price, Cost, Supplier, etc. are each their own column, and every product gets its own row (so multi-product invoices span a few rows sharing the same Invoice No). A "Suppliers" tab is also created automatically as a running purchase ledger. This only applies to invoices saved from now on — older rows already in the Sheet keep their old single-cell format; you can leave them or delete them.</div>
+        <div><b>Already set this up before?</b> — Open your existing Apps Script project, select all the old code and delete it, paste this new version in its place, then click Deploy → Manage deployments → ✎ (edit) → Version: "New version" → Deploy — <u>this last step is essential</u>; just saving the code (Ctrl+S) does NOT update your live Web App, it keeps serving the old code until you deploy a new version. The Invoices sheet is now columnar — Product, Qty, Price, Cost, Supplier, etc. are each their own column, and every product gets its own row (so multi-product invoices span a few rows sharing the same Invoice No). A "Suppliers" tab is also created automatically as a running purchase ledger. This only applies to invoices saved from now on — older rows already in the Sheet keep their old single-cell format; you can leave them or delete them.</div>
+      </div>
+      <div class="steps-box">
+        <div><b>What lives where:</b> "History", "Customers", and "Suppliers" inside this app are just views — built automatically from the Invoices sheet (and the auto-created Suppliers/Expenses sheets) every time a sync happens. They don't need their own separate Sheet tabs. The Suppliers sheet tab only gets rows once a product actually has a Supplier filled in; the Expenses sheet only appears once you add an expense from the Expenses tab.</div>
       </div>
       <div class="apps-script-box" id="scriptBox">
 <button class="copy-btn" id="copyScriptBtn">Copy</button>function doPost(e) {
@@ -1930,7 +1933,11 @@ function syncFromSheet(silent){
       STORE.set('td_last_sync', {at: new Date().toISOString(), ok:true});
       updateSyncStatusNote();
       if(!silent || addedInvoices || addedExpenses || addedQuotations){
-        toast(`Loaded ${addedInvoices} invoice(s), ${addedExpenses} expense(s), ${addedQuotations} quotation(s) from Sheet`);
+        if(!addedInvoices && !addedExpenses && !addedQuotations){
+          toast('Already up to date — nothing new in the Sheet');
+        } else {
+          toast(`Loaded ${addedInvoices} invoice(s), ${addedExpenses} expense(s), ${addedQuotations} quotation(s) from Sheet`);
+        }
       }
     })
     .catch(err=>{
@@ -2255,7 +2262,7 @@ function init(){
   document.getElementById('addExpenseBtn').onclick = addExpense;
   document.getElementById('exportExpensesBtn').onclick = exportExpensesCsv;
   document.getElementById('exportBackupBtn').onclick = exportBackup;
-  document.getElementById('syncFromSheetBtn').onclick = syncFromSheet;
+  document.getElementById('syncFromSheetBtn').onclick = ()=>syncFromSheet(false);
   document.getElementById('pushLocalBtn').onclick = async ()=>{
     if(!state.webhookUrl){ toast('Save a Web App URL first'); return; }
     if(!confirm(`Send all ${state.invoices.length} invoice(s), ${state.expenses.length} expense(s), and ${state.quotations.length} quotation(s) saved on this device to your Google Sheet? Run this once per device to avoid duplicate rows in the Sheet.`)) return;
@@ -2443,10 +2450,15 @@ function init(){
     fetch(state.webhookUrl, {
       method:'POST', mode:'no-cors',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({invoiceNo:'TEST-000', platform:'Test', orderId:'TEST', date:new Date().toISOString().slice(0,10),
+      body: JSON.stringify({
+        recordType:'invoice',
+        invoiceNo:'TEST-000', platform:'Test', orderId:'TEST', date:new Date().toISOString().slice(0,10),
         customerName:'Test Customer', mobile:'0000000000', address:'Test address',
-        products:'Test product x1 @0 [cost 0] [no warranty]', subtotal:0, deliveryCharge:0, grandTotal:0, totalCost:0, deliveryCostPaid:0, profit:0})
-    }).then(()=>toast('Test row sent — check your Sheet')).catch(()=>toast('Failed to send, check the URL'));
+        items:[{name:'Test product', model:'-', qty:1, price:0, cost:0, warranty:0, warrantyUnit:'Months', serial:'', supplier:'Test Supplier', proofLink:''}],
+        subtotal:0, deliveryCharge:0, grandTotal:0, totalCost:0, deliveryCostPaid:0,
+        packagingCost:0, transportCost:0, freelancerFee:0, profit:0, note:''
+      })
+    }).then(()=>toast('Test row sent — check your Sheet (Invoices + Suppliers tabs)')).catch(()=>toast('Failed to send, check the URL'));
   };
   document.getElementById('copyScriptBtn').onclick = ()=>{
     const text = document.getElementById('scriptBox').innerText.replace('Copy','').trim();
