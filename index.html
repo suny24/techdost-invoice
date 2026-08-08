@@ -1088,6 +1088,28 @@ function currentInvoiceNo(){
   return state.prefix + '-' + new Date().getFullYear() + '-' + String(state.nextNum).padStart(3,'0');
 }
 
+function recalcNextNumFromInvoices(){
+  // Prevents a fresh device from reusing an invoice number that already exists
+  // in synced history — always jump the counter past the highest number seen,
+  // regardless of which device originally created it.
+  const year = new Date().getFullYear();
+  const escapedPrefix = state.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('^' + escapedPrefix + '-' + year + '-(\\d+)$');
+  let maxNum = 0;
+  (state.invoices||[]).forEach(inv=>{
+    const m = (inv.invoiceNo||'').match(re);
+    if(m){ const n = parseInt(m[1],10); if(n > maxNum) maxNum = n; }
+  });
+  if(maxNum + 1 > state.nextNum){
+    state.nextNum = maxNum + 1;
+    STORE.set('td_counter', {prefix: state.prefix, nextNum: state.nextNum});
+    const field = document.getElementById('invoiceNo');
+    if(field) field.value = currentInvoiceNo();
+    const setField = document.getElementById('set_nextNum');
+    if(setField) setField.value = state.nextNum;
+  }
+}
+
 function renderPlatformSelect(){
   const sel = document.getElementById('platform');
   const current = sel.value;
@@ -1964,6 +1986,7 @@ function syncFromSheet(silent){
       STORE.set('td_quotations', state.quotations);
 
       renderHistory(); renderCustomers(); renderExpenses(); renderSupplierLedger(); renderQuotationHistory();
+      recalcNextNumFromInvoices();
       STORE.set('td_last_sync', {at: new Date().toISOString(), ok:true});
       updateSyncStatusNote();
       if(!silent || addedInvoices || addedExpenses || addedQuotations){
