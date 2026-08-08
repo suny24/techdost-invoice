@@ -832,6 +832,19 @@
     sheet.appendRow(["Invoice No","Platform","Order ID","Date","Customer Name","Mobile","Address","Product","Model","Qty","Price","Cost","Warranty","Warranty Unit","Serial","Supplier","Proof Link","Line Total","Subtotal","Delivery Charge","Grand Total","Total Cost","Delivery Cost Paid","Packaging Cost","Transport Cost","Freelancer Fee","Profit"]);
   }
 
+  // Remove any existing rows for this same Invoice No first, so re-pushing
+  // the same invoice (e.g. via "Push local data to Sheet") updates it in place
+  // instead of creating a duplicate.
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    var invoiceCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var r = invoiceCol.length - 1; r >= 0; r--) {
+      if (invoiceCol[r][0] === data.invoiceNo) {
+        sheet.deleteRow(r + 2);
+      }
+    }
+  }
+
   // One row per product — Product/Qty/Price/etc. are their own columns, so rows just
   // keep stacking underneath each other as more invoices come in.
   var items = data.items || [];
@@ -853,6 +866,16 @@
   }
   if (supSheet.getLastRow() === 0) {
     supSheet.appendRow(["Date","Invoice No","Supplier","Product","Model","Qty","Cost/Unit","Total Cost"]);
+  }
+  // Same de-dupe for the Suppliers ledger
+  var supLastRow = supSheet.getLastRow();
+  if (supLastRow > 1) {
+    var supInvoiceCol = supSheet.getRange(2, 2, supLastRow - 1, 1).getValues();
+    for (var sr = supInvoiceCol.length - 1; sr >= 0; sr--) {
+      if (supInvoiceCol[sr][0] === data.invoiceNo) {
+        supSheet.deleteRow(sr + 2);
+      }
+    }
   }
   items.forEach(function(item){
     if (item.supplier && String(item.supplier).trim()) {
