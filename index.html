@@ -2478,6 +2478,7 @@ function init(){
     updateSyncBadge();
     updateSyncStatusNote();
     toast('Google Sheet sync saved');
+    if(state.webhookUrl){ syncFromSheet(false); }
   };
   document.getElementById('testWebhookBtn').onclick = ()=>{
     if(!state.webhookUrl){ toast('Save a Web App URL first'); return; }
