@@ -2076,9 +2076,10 @@ function syncFromSheet(silent, done){
       return r.json();
     })
     .then(data=>{
-      let addedInvoices = 0, addedExpenses = 0;
+      let addedInvoices = 0, updatedInvoices = 0, addedExpenses = 0;
       const deletedInvoiceSet = new Set(state.deletedInvoiceNos);
-      const existingInvoiceNos = new Set(state.invoices.map(i=>i.invoiceNo));
+      const invoiceIndexByNo = {};
+      state.invoices.forEach((inv,i)=>{ invoiceIndexByNo[inv.invoiceNo] = i; });
       // Invoices sheet is columnar now — one row per product, sharing the same Invoice No.
       // Group the flat rows back into invoice objects with an items[] array.
       const grouped = {};
@@ -2090,7 +2091,7 @@ function syncFromSheet(silent, done){
         grouped[invoiceNo].push(row);
       });
       invoiceOrder.forEach(invoiceNo=>{
-        if(existingInvoiceNos.has(invoiceNo) || deletedInvoiceSet.has(invoiceNo)) return;
+        if(deletedInvoiceSet.has(invoiceNo)) return;
         const rows = grouped[invoiceNo];
         const first = rows[0];
         const items = rows.map(row=>({
@@ -2099,7 +2100,7 @@ function syncFromSheet(silent, done){
           warranty: parseFloat(row["Warranty"])||0, warrantyUnit: row["Warranty Unit"]||'Months',
           serial: row["Serial"]||'', supplier: row["Supplier"]||'', proofLink: row["Proof Link"]||''
         }));
-        state.invoices.push({
+        const rebuilt = {
           invoiceNo, platform: first["Platform"]||'-', orderId: first["Order ID"]||'-',
           date: first["Date"] instanceof Date ? first["Date"].toISOString().slice(0,10) : String(first["Date"]||''),
           customerName: first["Customer Name"]||'-', mobile: String(first["Mobile"]||'-'), address: first["Address"]||'-',
@@ -2109,9 +2110,21 @@ function syncFromSheet(silent, done){
           deliveryCostPaid: parseFloat(first["Delivery Cost Paid"])||0, packagingCost: parseFloat(first["Packaging Cost"])||0,
           transportCost: parseFloat(first["Transport Cost"])||0, freelancerFee: parseFloat(first["Freelancer Fee"])||0,
           profit: parseFloat(first["Profit"])||0
-        });
-        existingInvoiceNos.add(invoiceNo);
-        addedInvoices++;
+        };
+        // The Sheet is the shared source of truth on pull — if this device already has
+        // this Invoice No locally (e.g. an older version before an edit elsewhere),
+        // overwrite it with the Sheet's current copy instead of skipping it.
+        if(invoiceIndexByNo[invoiceNo] !== undefined){
+          const existing = state.invoices[invoiceIndexByNo[invoiceNo]];
+          if(JSON.stringify(existing) !== JSON.stringify(rebuilt)){
+            state.invoices[invoiceIndexByNo[invoiceNo]] = rebuilt;
+            updatedInvoices++;
+          }
+        } else {
+          state.invoices.push(rebuilt);
+          invoiceIndexByNo[invoiceNo] = state.invoices.length - 1;
+          addedInvoices++;
+        }
       });
       const deletedExpenseSet = new Set(state.deletedExpenseKeys);
       const existingExpenseKeys = new Set(state.expenses.map(e=>`${e.date}|${e.category}|${e.amount}|${e.note}`));
@@ -2200,11 +2213,16 @@ function syncFromSheet(silent, done){
 
       STORE.set('td_last_sync', {at: new Date().toISOString(), ok:true});
       updateSyncStatusNote();
-      if(!silent || addedInvoices || addedExpenses || addedQuotations){
-        if(!addedInvoices && !addedExpenses && !addedQuotations){
+      if(!silent || addedInvoices || updatedInvoices || addedExpenses || addedQuotations){
+        if(!addedInvoices && !updatedInvoices && !addedExpenses && !addedQuotations){
           toast('Already up to date — nothing new in the Sheet');
         } else {
-          toast(`Loaded ${addedInvoices} invoice(s), ${addedExpenses} expense(s), ${addedQuotations} quotation(s) from Sheet`);
+          const parts = [];
+          if(addedInvoices) parts.push(`${addedInvoices} new invoice(s)`);
+          if(updatedInvoices) parts.push(`${updatedInvoices} updated invoice(s)`);
+          if(addedExpenses) parts.push(`${addedExpenses} expense(s)`);
+          if(addedQuotations) parts.push(`${addedQuotations} quotation(s)`);
+          toast('Synced: ' + parts.join(', '));
         }
       }
       if(done) done();
