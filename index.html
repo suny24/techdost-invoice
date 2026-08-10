@@ -912,8 +912,68 @@
     }
   });
 
+  rebuildCustomersSheet();
+
   return ContentService.createTextOutput(JSON.stringify({status:"success"}))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+function rebuildCustomersSheet(){
+  // A real "Customers" tab, built directly in the Sheet — grouped by Mobile number —
+  // so it's visible without opening the app. Recomputed fresh from Invoices each time
+  // an invoice is saved, since Invoices has one row per product (not per invoice).
+  var invSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Invoices");
+  var custSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Customers");
+  if (!custSheet) {
+    custSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Customers");
+  }
+  var header = ["Customer Name","Mobile","Address","Orders","Total Spent","Last Order Date"];
+  if (!invSheet || invSheet.getLastRow() < 2) {
+    custSheet.clear();
+    custSheet.appendRow(header);
+    return;
+  }
+  var values = invSheet.getDataRange().getValues();
+  var headers = values[0];
+  var col = {};
+  headers.forEach(function(h, i){ col[h] = i; });
+
+  // Collapse multi-row (per-product) invoices down to one entry per unique Invoice No first
+  var uniqueInvoices = {};
+  for (var i = 1; i < values.length; i++) {
+    var row = values[i];
+    var invNo = row[col["Invoice No"]];
+    if (!invNo || uniqueInvoices[invNo]) continue;
+    uniqueInvoices[invNo] = {
+      name: row[col["Customer Name"]], mobile: row[col["Mobile"]], address: row[col["Address"]],
+      date: row[col["Date"]], grand: row[col["Grand Total"]]
+    };
+  }
+
+  var groups = {};
+  Object.keys(uniqueInvoices).forEach(function(invNo){
+    var inv = uniqueInvoices[invNo];
+    var key = (inv.mobile && String(inv.mobile).trim()) ? String(inv.mobile).trim() : inv.name;
+    if (!groups[key]) {
+      groups[key] = { name: inv.name, mobile: inv.mobile, address: inv.address, orders: 0, total: 0, lastDate: inv.date };
+    }
+    var g = groups[key];
+    g.orders += 1;
+    g.total += parseFloat(inv.grand) || 0;
+    if (new Date(inv.date) > new Date(g.lastDate)) {
+      g.lastDate = inv.date; g.name = inv.name; g.address = inv.address;
+    }
+  });
+
+  var outRows = Object.values(groups)
+    .sort(function(a,b){ return b.orders - a.orders; })
+    .map(function(g){ return [g.name, g.mobile, g.address, g.orders, g.total, g.lastDate]; });
+
+  custSheet.clear();
+  custSheet.appendRow(header);
+  if (outRows.length) {
+    custSheet.getRange(2, 1, outRows.length, header.length).setValues(outRows);
+  }
 }
 
 function doGet(e) {
