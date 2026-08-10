@@ -1059,6 +1059,7 @@ let state = {
   showSignature:true,
   prefix:"TD", nextNum:1,
   editingIndex: null, editingInvoiceNo: null,
+  recentlyEditedInvoices: {},
   qtPrefix:"QT", qtNextNum:1,
   webhookUrl:"",
   platforms: ["Facebook","Daraz","Personal","WhatsApp","Website"],
@@ -1492,6 +1493,11 @@ function saveInvoice(){
     state.nextNum += 1;
     STORE.set('td_counter', {prefix: state.prefix, nextNum: state.nextNum});
   }
+  // Protect this invoice from being overwritten by an incoming sync for a short
+  // window — the push below is fire-and-forget, so a sync that lands before Apps
+  // Script has actually committed the row would otherwise pull back the old data
+  // and undo this edit.
+  state.recentlyEditedInvoices[d.invoiceNo] = Date.now();
   STORE.set('td_invoices', state.invoices);
   renderPreview(d);
   toast(isEditing ? 'Invoice updated — ' + d.invoiceNo : 'Invoice saved — ' + d.invoiceNo);
@@ -2114,6 +2120,14 @@ function syncFromSheet(silent, done){
         // The Sheet is the shared source of truth on pull — if this device already has
         // this Invoice No locally (e.g. an older version before an edit elsewhere),
         // overwrite it with the Sheet's current copy instead of skipping it.
+        // Exception: skip overwriting an invoice edited on THIS device in the last
+        // 20 seconds — the edit's push may not have landed in the Sheet yet, so
+        // pulling now could revert it. The next sync (after the push lands) will
+        // pick up the correct version.
+        const recentEditAt = state.recentlyEditedInvoices[invoiceNo];
+        if(recentEditAt && (Date.now() - recentEditAt) < 20000){
+          return;
+        }
         if(invoiceIndexByNo[invoiceNo] !== undefined){
           const existing = state.invoices[invoiceIndexByNo[invoiceNo]];
           if(JSON.stringify(existing) !== JSON.stringify(rebuilt)){
