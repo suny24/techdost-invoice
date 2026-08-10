@@ -227,6 +227,13 @@
   <!-- ============ CREATE TAB ============ -->
   <div id="tab-create" class="tab-content">
 
+    <div class="card no-print" id="editModeBanner" style="display:none;background:#fff7e6;border-color:#f0c36d;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <div><b>Editing invoice <span id="editModeInvoiceNo"></span></b> — make your changes and click "Update invoice" below.</div>
+        <button class="btn btn-ghost" id="cancelEditBtn">Cancel edit</button>
+      </div>
+    </div>
+
     <div class="card no-print">
       <h2><span class="num">1</span> Invoice info</h2>
       <div class="grid3">
@@ -991,6 +998,7 @@ let state = {
   signatureImage:"",
   showSignature:true,
   prefix:"TD", nextNum:1,
+  editingIndex: null, editingInvoiceNo: null,
   qtPrefix:"QT", qtNextNum:1,
   webhookUrl:"",
   platforms: ["Facebook","Daraz","Personal","WhatsApp","Website"],
@@ -1416,12 +1424,23 @@ function renderChallan(d, selectedIdx){
 function saveInvoice(){
   const d = collectFormData();
   if(!d.items.length){ toast('Add at least one product'); return; }
-  state.invoices.push(d);
-  state.nextNum += 1;
+  const isEditing = state.editingIndex !== null && state.editingIndex !== undefined;
+  if(isEditing){
+    state.invoices[state.editingIndex] = d;
+  } else {
+    state.invoices.push(d);
+    state.nextNum += 1;
+    STORE.set('td_counter', {prefix: state.prefix, nextNum: state.nextNum});
+  }
   STORE.set('td_invoices', state.invoices);
-  STORE.set('td_counter', {prefix: state.prefix, nextNum: state.nextNum});
   renderPreview(d);
-  toast('Invoice saved — ' + d.invoiceNo);
+  toast(isEditing ? 'Invoice updated — ' + d.invoiceNo : 'Invoice saved — ' + d.invoiceNo);
+  if(isEditing){
+    state.editingIndex = null;
+    state.editingInvoiceNo = null;
+    document.getElementById('editModeBanner').style.display = 'none';
+    document.getElementById('saveBtn').textContent = 'Save invoice';
+  }
   document.getElementById('invoiceNo').value = currentInvoiceNo();
 
   if(state.webhookUrl){
@@ -1534,6 +1553,7 @@ function renderHistory(){
       <td><span class="badge ${badge.cls}">${badge.label}</span></td>
       <td class="hist-actions">
         <button class="btn btn-secondary" onclick="reprint(${realIdx})">Preview</button>
+        <button class="btn btn-ghost" onclick="editInvoice(${realIdx})">Edit</button>
         <button class="btn btn-ghost" onclick="toggleDetail(${realIdx})">Items</button>
         <button class="btn btn-ghost" onclick="deleteInvoice(${realIdx})">Delete</button>
       </td>
@@ -1578,6 +1598,51 @@ window.reorderInvoice = function(idx){
   toast('Pre-filled from previous order — review and Save');
   window.scrollTo({top:0, behavior:'smooth'});
 }
+window.editInvoice = function(idx){
+  const d = state.invoices[idx];
+  document.querySelector('.tab-btn[data-tab="create"]').click();
+  resetForm();
+  state.editingIndex = idx;
+  state.editingInvoiceNo = d.invoiceNo;
+  document.getElementById('invoiceNo').value = d.invoiceNo;
+  document.getElementById('orderId').value = d.orderId==='-' ? '' : d.orderId;
+  document.getElementById('invDate').value = d.date;
+  document.getElementById('custName').value = d.customerName==='-' ? '' : d.customerName;
+  document.getElementById('custMobile').value = d.mobile==='-' ? '' : d.mobile;
+  document.getElementById('custAddress').value = d.address==='-' ? '' : d.address;
+  document.getElementById('platform').value = state.platforms.includes(d.platform) ? d.platform : 'Other';
+  if(!state.platforms.includes(d.platform)){
+    document.getElementById('customPlatformField').style.display='block';
+    document.getElementById('customPlatform').value = d.platform;
+  }
+  document.getElementById('prodBody').innerHTML = '';
+  d.items.forEach(it=>addProductRow({name:it.name, model:it.model, serial:it.serial, qty:it.qty, cost:it.cost, price:it.price, warranty:it.warranty, warrantyUnit:it.warrantyUnit, supplier:it.supplier, proofLink:it.proofLink}));
+  const freeDelivery = document.getElementById('freeDelivery');
+  freeDelivery.checked = d.delivery===0 && d.deliveryCostPaid>0;
+  document.getElementById('deliveryCharge').value = d.delivery;
+  document.getElementById('deliveryCharge').disabled = freeDelivery.checked;
+  document.getElementById('deliveryCostPaid').value = d.deliveryCostPaid||0;
+  document.getElementById('packagingCost').value = d.packagingCost||0;
+  document.getElementById('transportCost').value = d.transportCost||0;
+  document.getElementById('freelancerFee').value = d.freelancerFee||0;
+  document.getElementById('incSignature').checked = !!d.includeSignature;
+  document.getElementById('invoiceNote').value = d.note||'';
+  document.getElementById('editModeInvoiceNo').textContent = d.invoiceNo;
+  document.getElementById('editModeBanner').style.display = 'block';
+  document.getElementById('saveBtn').textContent = 'Update invoice';
+  recalc();
+  toast('Editing ' + d.invoiceNo + ' — make your changes and update');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+function cancelEditMode(){
+  state.editingIndex = null;
+  state.editingInvoiceNo = null;
+  document.getElementById('editModeBanner').style.display = 'none';
+  document.getElementById('saveBtn').textContent = 'Save invoice';
+  resetForm();
+}
+
 window.deleteInvoice = function(idx){
   if(!confirm('Delete this invoice?')) return;
   const invoiceNo = state.invoices[idx] && state.invoices[idx].invoiceNo;
@@ -2475,7 +2540,8 @@ function init(){
   document.getElementById('platform').addEventListener('change', function(){
     document.getElementById('customPlatformField').style.display = this.value==='Other' ? 'block':'none';
   });
-  document.getElementById('clearBtn').onclick = resetForm;
+  document.getElementById('clearBtn').onclick = cancelEditMode;
+  document.getElementById('cancelEditBtn').onclick = cancelEditMode;
   document.getElementById('previewBtn').onclick = ()=>renderPreview(collectFormData());
   document.getElementById('challanBtn').onclick = ()=>{
     const d = collectFormData();
