@@ -798,6 +798,28 @@
 <button class="copy-btn" id="copyScriptBtn">Copy</button>function doPost(e) {
   var data = JSON.parse(e.postData.contents);
 
+  if (data.recordType === 'settings') {
+    var setSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Settings");
+    if (!setSheet) {
+      setSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Settings");
+    }
+    if (setSheet.getLastRow() === 0) {
+      setSheet.appendRow(["Business Name","Phone","Address","Facebook Page","Signature Image","Show Signature","Platforms","Suppliers","Updated At"]);
+    }
+    var settingsRow = [
+      data.bizName, data.bizPhone, data.bizAddress, data.bizFb,
+      data.signatureImage, data.showSignature, data.platforms, data.suppliers,
+      new Date()
+    ];
+    if (setSheet.getLastRow() >= 2) {
+      setSheet.getRange(2, 1, 1, settingsRow.length).setValues([settingsRow]);
+    } else {
+      setSheet.appendRow(settingsRow);
+    }
+    return ContentService.createTextOutput(JSON.stringify({status:"success"}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
   if (data.recordType === 'expense') {
     var expSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Expenses");
     if (!expSheet) {
@@ -905,7 +927,8 @@ function doGet(e) {
   var out = {
     invoices: sheetToObjects("Invoices"),
     expenses: sheetToObjects("Expenses"),
-    quotations: sheetToObjects("Quotations")
+    quotations: sheetToObjects("Quotations"),
+    settings: sheetToObjects("Settings")[0] || null
   };
   return ContentService.createTextOutput(JSON.stringify(out))
     .setMimeType(ContentService.MimeType.JSON);
@@ -1110,6 +1133,20 @@ function recalcNextNumFromInvoices(){
   }
 }
 
+function pushSettingsToSheet(){
+  if(!state.webhookUrl) return;
+  fetch(state.webhookUrl, {
+    method:'POST', mode:'no-cors',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({
+      recordType:'settings',
+      bizName: state.bizName||'', bizPhone: state.bizPhone||'', bizAddress: state.bizAddress||'', bizFb: state.bizFb||'',
+      signatureImage: state.signatureImage||'', showSignature: !!state.showSignature,
+      platforms: (state.platforms||[]).join('|'), suppliers: (state.suppliers||[]).join('|')
+    })
+  }).catch(()=>{});
+}
+
 function renderPlatformSelect(){
   const sel = document.getElementById('platform');
   const current = sel.value;
@@ -1127,6 +1164,7 @@ window.removePlatform = function(idx){
   STORE.set('td_platforms', state.platforms);
   renderPlatformSettingsList();
   renderPlatformSelect();
+  pushSettingsToSheet();
   toast('Platform removed');
 }
 
@@ -1140,6 +1178,7 @@ function addPlatform(){
   input.value='';
   renderPlatformSettingsList();
   renderPlatformSelect();
+  pushSettingsToSheet();
   toast('Platform added');
 }
 
@@ -1164,6 +1203,7 @@ window.removeSupplier = function(idx){
   STORE.set('td_suppliers', state.suppliers);
   renderSupplierSettingsList();
   renderSupplierDatalist();
+  pushSettingsToSheet();
   toast('Supplier removed');
 }
 
@@ -1177,6 +1217,7 @@ function addSupplier(){
   input.value='';
   renderSupplierSettingsList();
   renderSupplierDatalist();
+  pushSettingsToSheet();
   toast('Supplier added');
 }
 
@@ -1987,6 +2028,51 @@ function syncFromSheet(silent){
 
       renderHistory(); renderCustomers(); renderExpenses(); renderSupplierLedger(); renderQuotationHistory();
       recalcNextNumFromInvoices();
+
+      // Pull shared settings (business info, signature, platforms, suppliers) if present —
+      // these apply the same way across every device, so the Sheet's copy wins.
+      if(data.settings){
+        const s = data.settings;
+        if(s["Business Name"]!==undefined && s["Business Name"]!==''){
+          state.bizName = s["Business Name"]||''; state.bizPhone = s["Phone"]||'';
+          state.bizAddress = s["Address"]||''; state.bizFb = s["Facebook Page"]||'';
+          STORE.set('td_business', {bizName:state.bizName,bizPhone:state.bizPhone,bizAddress:state.bizAddress,bizFb:state.bizFb});
+          const nameEl=document.getElementById('set_bizName'), phoneEl=document.getElementById('set_bizPhone'),
+                addrEl=document.getElementById('set_bizAddress'), fbEl=document.getElementById('set_bizFb');
+          if(nameEl) nameEl.value=state.bizName;
+          if(phoneEl) phoneEl.value=state.bizPhone;
+          if(addrEl) addrEl.value=state.bizAddress;
+          if(fbEl) fbEl.value=state.bizFb;
+        }
+        if(s["Signature Image"]){
+          state.signatureImage = s["Signature Image"];
+          STORE.set('td_signature', state.signatureImage);
+        }
+        if(s["Show Signature"]!==undefined && s["Show Signature"]!==''){
+          state.showSignature = (s["Show Signature"]===true || s["Show Signature"]==='TRUE' || s["Show Signature"]==='true');
+          STORE.set('td_show_signature', state.showSignature);
+          const showEl=document.getElementById('set_showSignature');
+          if(showEl) showEl.checked = state.showSignature;
+        }
+        if(typeof renderSignaturePreview==='function') renderSignaturePreview();
+        if(s["Platforms"]){
+          state.platforms = String(s["Platforms"]).split('|').filter(Boolean);
+          STORE.set('td_platforms', state.platforms);
+          if(typeof renderPlatformSettingsList==='function') renderPlatformSettingsList();
+          if(typeof renderPlatformSelect==='function') renderPlatformSelect();
+        }
+        if(s["Suppliers"]){
+          state.suppliers = String(s["Suppliers"]).split('|').filter(Boolean);
+          STORE.set('td_suppliers', state.suppliers);
+          if(typeof renderSupplierSettingsList==='function') renderSupplierSettingsList();
+          if(typeof renderSupplierDatalist==='function') renderSupplierDatalist();
+        }
+      } else {
+        // No settings saved on the Sheet yet — push this device's current settings up
+        // so the next device to connect picks them up.
+        pushSettingsToSheet();
+      }
+
       STORE.set('td_last_sync', {at: new Date().toISOString(), ok:true});
       updateSyncStatusNote();
       if(!silent || addedInvoices || addedExpenses || addedQuotations){
@@ -2456,6 +2542,7 @@ function init(){
     state.bizAddress = document.getElementById('set_bizAddress').value;
     state.bizFb = document.getElementById('set_bizFb').value;
     STORE.set('td_business', {bizName:state.bizName,bizPhone:state.bizPhone,bizAddress:state.bizAddress,bizFb:state.bizFb});
+    pushSettingsToSheet();
     toast('Business info saved');
   };
   document.getElementById('set_signatureFile').onchange = (e)=>{
@@ -2472,6 +2559,7 @@ function init(){
       STORE.set('td_show_signature', state.showSignature);
       document.getElementById('set_showSignature').checked = true;
       renderSignaturePreview();
+      pushSettingsToSheet();
       toast('Signature saved');
     };
     reader.readAsDataURL(file);
@@ -2481,11 +2569,13 @@ function init(){
     STORE.set('td_signature', '');
     document.getElementById('set_signatureFile').value = '';
     renderSignaturePreview();
+    pushSettingsToSheet();
     toast('Signature removed');
   };
   document.getElementById('set_showSignature').onchange = (e)=>{
     state.showSignature = e.target.checked;
     STORE.set('td_show_signature', state.showSignature);
+    pushSettingsToSheet();
   };
   renderSignaturePreview();
   document.getElementById('saveCounterBtn').onclick = ()=>{
