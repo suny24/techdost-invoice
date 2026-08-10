@@ -1013,9 +1013,9 @@ function doGet(e) {
         <button class="btn btn-primary" id="saveWebhookBtn">Save</button>
         <button class="btn btn-ghost" id="testWebhookBtn">Send test row</button>
         <button class="btn btn-secondary" id="syncFromSheetBtn">⬇ Load history from Sheet</button>
-        <button class="btn btn-secondary" id="pushLocalBtn">⬆ Push this device's data to Sheet</button>
+        <button class="btn btn-secondary" id="pushLocalBtn">⟲ Sync now (pulls + pushes this device)</button>
       </div>
-      <p class="settings-note">Without a URL, invoices still save on this device and you can export CSV anytime from History. "Load history from Sheet" pulls in any invoices/expenses saved from other devices, so History and Customers stay complete wherever you open this tool. "Push this device's data to Sheet" sends everything already saved on <b>this</b> device to the Sheet — use this once, on whichever device has your existing invoices, right after setting up sync (so other devices have something to pull).</p>
+      <p class="settings-note">Without a URL, invoices still save on this device and you can export CSV anytime from History. Once a URL is saved, this app auto-syncs every ~45 seconds and whenever you return to the tab, so most of the time neither button below is needed. "Load history from Sheet" pulls in anything new immediately, without also sending data up. "Sync now" does both in one tap — pulls in anything new first, then sends everything on <b>this</b> device to the Sheet — the safest one to use if unsure.</p>
     </div>
 
     <div class="card">
@@ -2067,8 +2067,8 @@ function parseProductsString(str){
   return parsed;
 }
 
-function syncFromSheet(silent){
-  if(!state.webhookUrl){ if(!silent) toast('Set up Google Sheet sync first'); return; }
+function syncFromSheet(silent, done){
+  if(!state.webhookUrl){ if(!silent) toast('Set up Google Sheet sync first'); if(done) done(); return; }
   if(!silent) toast('Loading from Sheet...');
   fetch(state.webhookUrl, { method:'GET' })
     .then(r=>{
@@ -2207,11 +2207,13 @@ function syncFromSheet(silent){
           toast(`Loaded ${addedInvoices} invoice(s), ${addedExpenses} expense(s), ${addedQuotations} quotation(s) from Sheet`);
         }
       }
+      if(done) done();
     })
     .catch(err=>{
       STORE.set('td_last_sync', {at: new Date().toISOString(), ok:false, error: String(err && err.message || err)});
       updateSyncStatusNote();
       if(!silent) toast('Could not load from Sheet — check the URL and your connection');
+      if(done) done();
     });
 }
 
@@ -2533,8 +2535,10 @@ function init(){
   document.getElementById('syncFromSheetBtn').onclick = ()=>syncFromSheet(false);
   document.getElementById('pushLocalBtn').onclick = async ()=>{
     if(!state.webhookUrl){ toast('Save a Web App URL first'); return; }
-    if(!confirm(`Send all ${state.invoices.length} invoice(s), ${state.expenses.length} expense(s), and ${state.quotations.length} quotation(s) saved on this device to your Google Sheet? Run this once per device to avoid duplicate rows in the Sheet.`)) return;
-    toast('Pushing data to Sheet...');
+    if(!confirm(`Sync now? This pulls in anything new from the Sheet first, then sends all ${state.invoices.length} invoice(s), ${state.expenses.length} expense(s), and ${state.quotations.length} quotation(s) on this device up to the Sheet.`)) return;
+    toast('Syncing...');
+    await new Promise(resolve=>{ syncFromSheet(true, resolve); });
+    toast('Pushing this device\'s data to Sheet...');
     const send = (payload)=> fetch(state.webhookUrl, {
       method:'POST', mode:'no-cors',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
@@ -2567,7 +2571,8 @@ function init(){
       });
       await new Promise(r=>setTimeout(r, 250));
     }
-    toast(`Pushed ${state.invoices.length} invoice(s), ${state.expenses.length} expense(s), ${state.quotations.length} quotation(s) — check your Sheet`);
+    pushSettingsToSheet();
+    toast(`Synced — pulled the latest and pushed ${state.invoices.length} invoice(s), ${state.expenses.length} expense(s), ${state.quotations.length} quotation(s)`);
   };
   document.getElementById('importBackupInput').addEventListener('change', function(){
     if(this.files && this.files[0]) importBackup(this.files[0]);
