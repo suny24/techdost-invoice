@@ -805,14 +805,27 @@
 <button class="copy-btn" id="copyScriptBtn">Copy</button>function doPost(e) {
   var data = JSON.parse(e.postData.contents);
 
+  function ensureHeader(sheet, header) {
+    // Writes the header if the sheet is empty, or REWRITES row 1 if it exists but
+    // doesn't match — this self-heals a sheet stuck with a stale/old header row
+    // from an earlier version of this script, without touching data rows below.
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(header);
+      return;
+    }
+    var currentHeader = sheet.getRange(1, 1, 1, header.length).getValues()[0];
+    var matches = currentHeader.length === header.length && currentHeader.every(function(v, i){ return v === header[i]; });
+    if (!matches) {
+      sheet.getRange(1, 1, 1, header.length).setValues([header]);
+    }
+  }
+
   if (data.recordType === 'settings') {
     var setSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Settings");
     if (!setSheet) {
       setSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Settings");
     }
-    if (setSheet.getLastRow() === 0) {
-      setSheet.appendRow(["Business Name","Phone","Address","Facebook Page","Signature Image","Show Signature","Platforms","Suppliers","Updated At"]);
-    }
+    ensureHeader(setSheet, ["Business Name","Phone","Address","Facebook Page","Signature Image","Show Signature","Platforms","Suppliers","Updated At"]);
     var settingsRow = [
       data.bizName, data.bizPhone, data.bizAddress, data.bizFb,
       data.signatureImage, data.showSignature, data.platforms, data.suppliers,
@@ -832,9 +845,7 @@
     if (!expSheet) {
       expSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Expenses");
     }
-    if (expSheet.getLastRow() === 0) {
-      expSheet.appendRow(["Date","Category","Note","Amount"]);
-    }
+    ensureHeader(expSheet, ["Date","Category","Note","Amount"]);
     expSheet.appendRow([data.date, data.category, data.note, data.amount]);
     return ContentService.createTextOutput(JSON.stringify({status:"success"}))
       .setMimeType(ContentService.MimeType.JSON);
@@ -845,9 +856,7 @@
     if (!qtSheet) {
       qtSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Quotations");
     }
-    if (qtSheet.getLastRow() === 0) {
-      qtSheet.appendRow(["Quotation No","Date","Valid Until","Client Name","Client Phone","Client Address","Items","Grand Total","Notes"]);
-    }
+    ensureHeader(qtSheet, ["Quotation No","Date","Valid Until","Client Name","Client Phone","Client Address","Items","Grand Total","Notes"]);
     qtSheet.appendRow([data.qtNo, data.date, data.validUntil, data.clientName, data.clientPhone, data.clientAddress, data.items, data.grand, data.notes]);
     return ContentService.createTextOutput(JSON.stringify({status:"success"}))
       .setMimeType(ContentService.MimeType.JSON);
@@ -857,9 +866,7 @@
   if (!sheet) {
     sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Invoices");
   }
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["Invoice No","Platform","Order ID","Date","Customer Name","Mobile","Address","Product","Model","Qty","Price","Cost","Warranty","Warranty Unit","Serial","Supplier","Proof Link","Line Total","Subtotal","Delivery Charge","Grand Total","Total Cost","Delivery Cost Paid","Packaging Cost","Transport Cost","Freelancer Fee","Profit"]);
-  }
+  ensureHeader(sheet, ["Invoice No","Platform","Order ID","Date","Customer Name","Mobile","Address","Product","Model","Qty","Price","Cost","Warranty","Warranty Unit","Serial","Supplier","Proof Link","Line Total","Subtotal","Delivery Charge","Grand Total","Total Cost","Delivery Cost Paid","Packaging Cost","Transport Cost","Freelancer Fee","Profit"]);
 
   // Remove any existing rows for this same Invoice No first, so re-pushing
   // the same invoice (e.g. via "Push local data to Sheet") updates it in place
@@ -893,9 +900,7 @@
   if (!supSheet) {
     supSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Suppliers");
   }
-  if (supSheet.getLastRow() === 0) {
-    supSheet.appendRow(["Date","Invoice No","Supplier","Product","Model","Qty","Cost/Unit","Total Cost"]);
-  }
+  ensureHeader(supSheet, ["Date","Invoice No","Supplier","Product","Model","Qty","Cost/Unit","Total Cost"]);
   // Same de-dupe for the Suppliers ledger
   var supLastRow = supSheet.getLastRow();
   if (supLastRow > 1) {
@@ -1410,7 +1415,7 @@ function collectFormData(){
     invoiceNo: document.getElementById('invoiceNo').value,
     platform: getPlatform(),
     orderId: document.getElementById('orderId').value || '-',
-    date: document.getElementById('invDate').value,
+    date: document.getElementById('invDate').value || new Date().toISOString().slice(0,10),
     customerName: document.getElementById('custName').value || '-',
     mobile: document.getElementById('custMobile').value || '-',
     address: document.getElementById('custAddress').value || '-',
@@ -1526,6 +1531,19 @@ function saveInvoice(){
     }).then(()=>toast('Synced to Google Sheet')).catch(()=>toast('Sheet sync failed, but saved locally'));
   }
   renderHistory();
+}
+
+function toDateInputValue(dateStr){
+  // Normalizes any date-ish string (full ISO timestamp, Date object toString, etc.)
+  // into the strict YYYY-MM-DD format a native <input type="date"> requires —
+  // setting .value to anything else is silently ignored and leaves the field blank.
+  if(!dateStr) return new Date().toISOString().slice(0,10);
+  const s = String(dateStr);
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if(m) return m[1];
+  const parsed = new Date(s);
+  if(!isNaN(parsed.getTime())) return parsed.toISOString().slice(0,10);
+  return new Date().toISOString().slice(0,10);
 }
 
 function resetForm(){
@@ -1672,7 +1690,7 @@ window.editInvoice = function(idx){
   state.editingInvoiceNo = d.invoiceNo;
   document.getElementById('invoiceNo').value = d.invoiceNo;
   document.getElementById('orderId').value = d.orderId==='-' ? '' : d.orderId;
-  document.getElementById('invDate').value = d.date;
+  document.getElementById('invDate').value = toDateInputValue(d.date);
   document.getElementById('custName').value = d.customerName==='-' ? '' : d.customerName;
   document.getElementById('custMobile').value = d.mobile==='-' ? '' : d.mobile;
   document.getElementById('custAddress').value = d.address==='-' ? '' : d.address;
