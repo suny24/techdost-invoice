@@ -1024,6 +1024,14 @@ function doGet(e) {
     </div>
 
     <div class="card">
+      <h2>Troubleshooting</h2>
+      <p class="settings-note">If this device shows "Already up to date" but an invoice you know is in the Sheet still isn't showing here, it may be on this device's "don't bring this back" list (left over from deleting something locally at some point, even in earlier testing). Clearing that list and syncing again fixes it — this doesn't delete anything, it just lets already-deleted-elsewhere invoices sync back in if the Sheet still has them.</p>
+      <div class="row-actions">
+        <button class="btn btn-secondary" id="clearDeletedListBtn">Reset "deleted" list &amp; sync again</button>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Full data backup</h2>
       <p class="settings-note">Save everything (invoices, expenses, platforms, suppliers, settings) as one file — useful before clearing browser data, or to move to a new device/browser.</p>
       <div class="row-actions">
@@ -2581,6 +2589,14 @@ function init(){
   document.getElementById('addProductTemplateBtn').onclick = addProductTemplate;
   document.getElementById('addExpenseBtn').onclick = addExpense;
   document.getElementById('exportExpensesBtn').onclick = exportExpensesCsv;
+  document.getElementById('clearDeletedListBtn').onclick = ()=>{
+    state.deletedInvoiceNos = [];
+    state.deletedExpenseKeys = [];
+    STORE.set('td_deleted_invoices', []);
+    STORE.set('td_deleted_expenses', []);
+    toast('Cleared — syncing now...');
+    syncFromSheet(false);
+  };
   document.getElementById('exportBackupBtn').onclick = exportBackup;
   document.getElementById('syncFromSheetBtn').onclick = ()=>syncFromSheet(false);
   document.getElementById('pushLocalBtn').onclick = async ()=>{
