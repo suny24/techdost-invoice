@@ -1670,6 +1670,7 @@ window.toggleDetail = function(idx){
 window.reprint = function(idx){
   const d = state.invoices[idx];
   document.querySelector('.tab-btn[data-tab="create"]').click();
+  document.getElementById('incSignature').checked = !!d.includeSignature;
   renderPreview(d);
   window.scrollTo({top: document.getElementById('invoiceSheet').offsetTop-20, behavior:'smooth'});
 }
@@ -1744,6 +1745,23 @@ window.deleteInvoice = function(idx){
   if(invoiceNo){
     state.deletedInvoiceNos.push(invoiceNo);
     STORE.set('td_deleted_invoices', state.deletedInvoiceNos);
+    // If this was the most recently issued number (e.g. a mistaken invoice made
+    // right before deleting it), free it back up so the next invoice reuses it
+    // instead of leaving a permanent gap in the numbering.
+    const year = new Date().getFullYear();
+    const expected = `${state.prefix}-${year}-${String(state.nextNum-1).padStart(3,'0')}`;
+    if(invoiceNo === expected && state.nextNum > 1){
+      state.nextNum -= 1;
+      STORE.set('td_counter', {prefix: state.prefix, nextNum: state.nextNum});
+      // Also un-mark it as permanently deleted, since it's about to be reissued —
+      // otherwise this same device would refuse to ever sync it back in later.
+      state.deletedInvoiceNos = state.deletedInvoiceNos.filter(n=>n!==invoiceNo);
+      STORE.set('td_deleted_invoices', state.deletedInvoiceNos);
+      const field = document.getElementById('invoiceNo');
+      if(field) field.value = currentInvoiceNo();
+      const setField = document.getElementById('set_nextNum');
+      if(setField) setField.value = state.nextNum;
+    }
   }
   renderHistory();
   toast('Deleted');
@@ -2425,6 +2443,7 @@ function renderQuotationHistory(){
 
 window.reprintQuotation = function(idx){
   const q = state.quotations[idx];
+  document.getElementById('qtIncSignature').checked = !!q.includeSignature;
   renderQuotationPreview(q);
   window.scrollTo({top: document.getElementById('quotationSheet').offsetTop-20, behavior:'smooth'});
 }
@@ -2673,6 +2692,26 @@ function init(){
     document.getElementById('customPlatformField').style.display = this.value==='Other' ? 'block':'none';
   });
   document.getElementById('clearBtn').onclick = cancelEditMode;
+  document.getElementById('incSignature').onchange = ()=>{
+    const line = document.getElementById('pv_sigLine');
+    const checked = document.getElementById('incSignature').checked;
+    if(checked && !state.signatureImage){
+      toast('No signature uploaded yet — add one in Settings first');
+    }
+    if(line){
+      line.innerHTML = (state.signatureImage && checked) ? `<img src="${state.signatureImage}" alt="Signature">` : '';
+    }
+  };
+  document.getElementById('qtIncSignature').onchange = ()=>{
+    const line = document.getElementById('qtpv_sigLine');
+    if(line){
+      const checked = document.getElementById('qtIncSignature').checked;
+      if(checked && !state.signatureImage){
+        toast('No signature uploaded yet — add one in Settings first');
+      }
+      line.innerHTML = (state.signatureImage && checked) ? `<img src="${state.signatureImage}" alt="Signature">` : '';
+    }
+  };
   document.getElementById('cancelEditBtn').onclick = cancelEditMode;
   document.getElementById('previewBtn').onclick = ()=>renderPreview(collectFormData());
   document.getElementById('challanBtn').onclick = ()=>{
