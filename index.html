@@ -803,7 +803,33 @@
         <div><b>What lives where:</b> "History", "Customers", and "Suppliers" inside this app are just views — built automatically from the Invoices sheet (and the auto-created Suppliers/Expenses sheets) every time a sync happens. They don't need their own separate Sheet tabs. The Suppliers sheet tab only gets rows once a product actually has a Supplier filled in; the Expenses sheet only appears once you add an expense from the Expenses tab.</div>
       </div>
       <div class="apps-script-box" id="scriptBox">
-<button class="copy-btn" id="copyScriptBtn">Copy</button>function doPost(e) {
+<button class="copy-btn" id="copyScriptBtn">Copy</button>var TZ = "Asia/Dhaka";
+
+function dayText(v) {
+  if (Object.prototype.toString.call(v) === "[object Date]") return Utilities.formatDate(v, TZ, "yyyy-MM-dd");
+  return String(v);
+}
+
+// Delete every row whose value in column colIndex (0 = first column) matches
+function removeRowsWhere(sheet, colIndex, test) {
+  if (!sheet) return;
+  var vals = sheet.getDataRange().getValues();
+  for (var r = vals.length - 1; r >= 1; r--) {
+    if (test(vals[r][colIndex])) sheet.deleteRow(r + 1);
+  }
+}
+
+// A re-issued number (or re-saved record) must not stay on the "Deleted" list
+function clearDeletedMark(kind, key) {
+  var d = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Deleted");
+  if (!d) return;
+  var vals = d.getDataRange().getValues();
+  for (var r = vals.length - 1; r >= 1; r--) {
+    if (vals[r][0] === kind && String(vals[r][1]) === String(key)) d.deleteRow(r + 1);
+  }
+}
+
+function doPost(e) {
   var data = JSON.parse(e.postData.contents);
 
   function ensureHeader(sheet, header) {
@@ -821,12 +847,43 @@
     }
   }
 
+  // Delete: really remove the rows from the Sheet, and note it in a "Deleted" tab
+  // so every other device removes its copy too (and it never comes back).
+  if (data.recordType === 'delete') {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var dkey = String(data.key);
+    if (data.kind === 'invoice') {
+      removeRowsWhere(ss.getSheetByName("Invoices"), 0, function(v){ return String(v) === dkey; });
+      removeRowsWhere(ss.getSheetByName("Suppliers"), 1, function(v){ return String(v) === dkey; });
+      rebuildCustomersSheet();
+    } else if (data.kind === 'quotation') {
+      removeRowsWhere(ss.getSheetByName("Quotations"), 0, function(v){ return String(v) === dkey; });
+    } else if (data.kind === 'expense') {
+      var es = ss.getSheetByName("Expenses");
+      if (es) {
+        var ev = es.getDataRange().getValues();
+        for (var er = ev.length - 1; er >= 1; er--) {
+          var ek = dayText(ev[er][0]) + "|" + ev[er][1] + "|" + ev[er][3] + "|" + ev[er][2];
+          if (ek === dkey) { es.deleteRow(er + 1); break; }
+        }
+      }
+    }
+    var delSheet = ss.getSheetByName("Deleted");
+    if (!delSheet) { delSheet = ss.insertSheet("Deleted"); }
+    ensureHeader(delSheet, ["Type","Key","Deleted At"]);
+    delSheet.getRange(delSheet.getLastRow() + 1, 2).setNumberFormat("@");
+    delSheet.appendRow([data.kind, dkey, new Date()]);
+    return ContentService.createTextOutput(JSON.stringify({status:"success"}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
   if (data.recordType === 'settings') {
     var setSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Settings");
     if (!setSheet) {
       setSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Settings");
     }
     ensureHeader(setSheet, ["Business Name","Phone","Address","Facebook Page","Signature Image","Show Signature","Platforms","Suppliers","Updated At"]);
+    setSheet.getRange(1, 2, setSheet.getMaxRows(), 1).setNumberFormat("@");  // Phone stays text (keeps leading 0)
     var settingsRow = [
       data.bizName, data.bizPhone, data.bizAddress, data.bizFb,
       data.signatureImage, data.showSignature, data.platforms, data.suppliers,
@@ -858,6 +915,8 @@
       qtSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Quotations");
     }
     ensureHeader(qtSheet, ["Quotation No","Date","Valid Until","Client Name","Client Phone","Client Address","Items","Grand Total","Notes"]);
+    qtSheet.getRange(1, 5, qtSheet.getMaxRows(), 1).setNumberFormat("@");  // Client Phone stays text
+    clearDeletedMark("quotation", data.qtNo);
     qtSheet.appendRow([data.qtNo, data.date, data.validUntil, data.clientName, data.clientPhone, data.clientAddress, data.items, data.grand, data.notes]);
     return ContentService.createTextOutput(JSON.stringify({status:"success"}))
       .setMimeType(ContentService.MimeType.JSON);
@@ -868,6 +927,9 @@
     sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet("Invoices");
   }
   ensureHeader(sheet, ["Invoice No","Platform","Order ID","Date","Customer Name","Mobile","Address","Product","Model","Qty","Price","Cost","Warranty","Warranty Unit","Serial","Supplier","Proof Link","Line Total","Subtotal","Delivery Charge","Grand Total","Total Cost","Delivery Cost Paid","Packaging Cost","Transport Cost","Freelancer Fee","Profit"]);
+
+  sheet.getRange(1, 6, sheet.getMaxRows(), 1).setNumberFormat("@");  // Mobile stays text (keeps leading 0)
+  clearDeletedMark("invoice", data.invoiceNo);
 
   // Remove any existing rows for this same Invoice No first, so re-pushing
   // the same invoice (e.g. via "Push local data to Sheet") updates it in place
@@ -977,6 +1039,7 @@ function rebuildCustomersSheet(){
 
   custSheet.clear();
   custSheet.appendRow(header);
+  custSheet.getRange(1, 2, custSheet.getMaxRows(), 1).setNumberFormat("@");
   if (outRows.length) {
     custSheet.getRange(2, 1, outRows.length, header.length).setValues(outRows);
   }
@@ -992,7 +1055,17 @@ function doGet(e) {
     var rows = [];
     for (var i = 1; i < values.length; i++) {
       var obj = {};
-      for (var j = 0; j < headers.length; j++) { obj[headers[j]] = values[i][j]; }
+      for (var j = 0; j < headers.length; j++) {
+        var cell = values[i][j];
+        var hd = headers[j];
+        if (Object.prototype.toString.call(cell) === "[object Date]") {
+          cell = Utilities.formatDate(cell, TZ, "yyyy-MM-dd");
+        } else if ((hd === "Mobile" || hd === "Phone" || hd === "Client Phone") && typeof cell === "number") {
+          cell = String(cell);
+          if (/^1[0-9]{9}$/.test(cell)) cell = "0" + cell;   // Sheets had dropped the leading 0
+        }
+        obj[hd] = cell;
+      }
       rows.push(obj);
     }
     return rows;
@@ -1001,7 +1074,8 @@ function doGet(e) {
     invoices: sheetToObjects("Invoices"),
     expenses: sheetToObjects("Expenses"),
     quotations: sheetToObjects("Quotations"),
-    settings: sheetToObjects("Settings")[0] || null
+    settings: sheetToObjects("Settings")[0] || null,
+    deleted: sheetToObjects("Deleted")
   };
   return ContentService.createTextOutput(JSON.stringify(out))
     .setMimeType(ContentService.MimeType.JSON);
@@ -1094,6 +1168,31 @@ function toast(msg){
 }
 
 function fmtMoney(n){ return 'BDT ' + (Math.round(n*100)/100).toLocaleString('en-US'); }
+
+// Google Sheets hands dates back as ISO text (e.g. 2026-10-09T18:00:00.000Z = already 10 Oct in Bangladesh).
+// Convert to a plain local YYYY-MM-DD.
+function sheetDate(v){
+  if(v===null || v===undefined || v==='') return '';
+  const str = String(v);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const d = new Date(str);
+  if(isNaN(d.getTime())) return str;
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+// Sheets turns 01712345678 into the number 1712345678 — put the leading 0 back.
+function normPhone(v){
+  const t = String(v===null||v===undefined?'':v).trim();
+  return /^1\d{9}$/.test(t) ? '0'+t : t;
+}
+// Tell the Sheet to really remove a row, so the deletion reaches every device.
+function sendDelete(kind, key){
+  if(!state.webhookUrl) return;
+  fetch(state.webhookUrl, {
+    method:'POST', mode:'no-cors',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({recordType:'delete', kind, key})
+  }).catch(()=>{});
+}
 
 function addProductRow(data){
   const tr = document.createElement('tr');
@@ -1439,7 +1538,7 @@ function collectFormData(){
 
 function renderPreview(d){
   document.getElementById('pv_bizName').textContent = state.bizName;
-  document.getElementById('pv_bizPhone').textContent = 'Phone: ' + (state.bizPhone||'—');
+  document.getElementById('pv_bizPhone').textContent = 'Phone: ' + (normPhone(state.bizPhone)||'—');
   document.getElementById('pv_bizAddress').textContent = 'Address: ' + (state.bizAddress||'—');
   document.getElementById('pv_bizFb').textContent = 'Facebook: ' + (state.bizFb||'—');
   document.getElementById('pv_invoiceNo').textContent = d.invoiceNo;
@@ -1477,7 +1576,7 @@ function renderChallan(d, selectedIdx){
   const chLogo = document.querySelector('#challanSheet img.logo');
   if(chLogo && logoSrc) chLogo.src = logoSrc;
   document.getElementById('ch_bizName').textContent = state.bizName;
-  document.getElementById('ch_bizPhone').textContent = 'Phone: ' + (state.bizPhone || '—');
+  document.getElementById('ch_bizPhone').textContent = 'Phone: ' + (normPhone(state.bizPhone) || '—');
   document.getElementById('ch_bizAddress').textContent = 'Address: ' + (state.bizAddress || '—');
   document.getElementById('ch_no').textContent = d.invoiceNo + '-CH';
   document.getElementById('ch_invoiceRef').textContent = d.invoiceNo;
@@ -1745,6 +1844,7 @@ window.deleteInvoice = function(idx){
   if(invoiceNo){
     state.deletedInvoiceNos.push(invoiceNo);
     STORE.set('td_deleted_invoices', state.deletedInvoiceNos);
+    sendDelete('invoice', invoiceNo);
     // If this was the most recently issued number (e.g. a mistaken invoice made
     // right before deleting it), free it back up so the next invoice reuses it
     // instead of leaving a permanent gap in the numbering.
@@ -1832,6 +1932,7 @@ window.deleteExpense = function(idx){
     const key = `${e.date}|${e.category}|${e.amount}|${e.note}`;
     state.deletedExpenseKeys.push(key);
     STORE.set('td_deleted_expenses', state.deletedExpenseKeys);
+    sendDelete('expense', key);
   }
   renderExpenses();
 }
@@ -2127,6 +2228,27 @@ function syncFromSheet(silent, done){
       return r.json();
     })
     .then(data=>{
+      // Deletions made on any device (listed in the Sheet's "Deleted" tab) — skip ones that
+      // were re-issued/re-saved since (their row is back in the Sheet).
+      const sheetInvoiceNos = new Set((data.invoices||[]).map(r=>String(r["Invoice No"])));
+      const sheetQtNos = new Set((data.quotations||[]).map(r=>String(r["Quotation No"])));
+      (data.deleted||[]).forEach(row=>{
+        const type = row["Type"], key = String(row["Key"]||'');
+        if(!key) return;
+        if(type==='invoice' && !sheetInvoiceNos.has(key)){
+          if(!state.deletedInvoiceNos.includes(key)) state.deletedInvoiceNos.push(key);
+          state.invoices = state.invoices.filter(i=>i.invoiceNo!==key);
+        } else if(type==='quotation' && !sheetQtNos.has(key)){
+          if(!state.deletedQtNos.includes(key)) state.deletedQtNos.push(key);
+          state.quotations = state.quotations.filter(q=>q.qtNo!==key);
+        } else if(type==='expense'){
+          if(!state.deletedExpenseKeys.includes(key)) state.deletedExpenseKeys.push(key);
+          state.expenses = state.expenses.filter(e=>`${e.date}|${e.category}|${e.amount}|${e.note}`!==key);
+        }
+      });
+      STORE.set('td_deleted_invoices', state.deletedInvoiceNos);
+      STORE.set('td_deleted_quotations', state.deletedQtNos);
+      STORE.set('td_deleted_expenses', state.deletedExpenseKeys);
       let addedInvoices = 0, updatedInvoices = 0, addedExpenses = 0;
       const deletedInvoiceSet = new Set(state.deletedInvoiceNos);
       const invoiceIndexByNo = {};
@@ -2153,8 +2275,8 @@ function syncFromSheet(silent, done){
         }));
         const rebuilt = {
           invoiceNo, platform: first["Platform"]||'-', orderId: first["Order ID"]||'-',
-          date: first["Date"] instanceof Date ? first["Date"].toISOString().slice(0,10) : String(first["Date"]||''),
-          customerName: first["Customer Name"]||'-', mobile: String(first["Mobile"]||'-'), address: first["Address"]||'-',
+          date: sheetDate(first["Date"]),
+          customerName: first["Customer Name"]||'-', mobile: normPhone(first["Mobile"]||'-'), address: first["Address"]||'-',
           items,
           subtotal: parseFloat(first["Subtotal"])||0, delivery: parseFloat(first["Delivery Charge"])||0,
           grand: parseFloat(first["Grand Total"])||0, totalCost: parseFloat(first["Total Cost"])||0,
@@ -2188,7 +2310,7 @@ function syncFromSheet(silent, done){
       const deletedExpenseSet = new Set(state.deletedExpenseKeys);
       const existingExpenseKeys = new Set(state.expenses.map(e=>`${e.date}|${e.category}|${e.amount}|${e.note}`));
       (data.expenses||[]).forEach(row=>{
-        const date = row["Date"] instanceof Date ? row["Date"].toISOString().slice(0,10) : String(row["Date"]||'');
+        const date = sheetDate(row["Date"]);
         const category = row["Category"]||'Other';
         const amount = parseFloat(row["Amount"])||0;
         const note = row["Note"]||'';
@@ -2213,9 +2335,9 @@ function syncFromSheet(silent, done){
         });
         state.quotations.push({
           qtNo,
-          date: row["Date"] instanceof Date ? row["Date"].toISOString().slice(0,10) : String(row["Date"]||''),
-          validUntil: row["Valid Until"] instanceof Date ? row["Valid Until"].toISOString().slice(0,10) : String(row["Valid Until"]||''),
-          clientName: row["Client Name"]||'-', clientPhone: String(row["Client Phone"]||'-'), clientAddress: row["Client Address"]||'-',
+          date: sheetDate(row["Date"]),
+          validUntil: sheetDate(row["Valid Until"]),
+          clientName: row["Client Name"]||'-', clientPhone: normPhone(row["Client Phone"]||'-'), clientAddress: row["Client Address"]||'-',
           items, grand: parseFloat(row["Grand Total"])||0, notes: row["Notes"]||''
         });
         existingQtNos.add(qtNo);
@@ -2231,7 +2353,7 @@ function syncFromSheet(silent, done){
       if(data.settings){
         const s = data.settings;
         if(s["Business Name"]!==undefined && s["Business Name"]!==''){
-          state.bizName = s["Business Name"]||''; state.bizPhone = s["Phone"]||'';
+          state.bizName = s["Business Name"]||''; state.bizPhone = normPhone(s["Phone"]);
           state.bizAddress = s["Address"]||''; state.bizFb = s["Facebook Page"]||'';
           STORE.set('td_business', {bizName:state.bizName,bizPhone:state.bizPhone,bizAddress:state.bizAddress,bizFb:state.bizFb});
           const nameEl=document.getElementById('set_bizName'), phoneEl=document.getElementById('set_bizPhone'),
@@ -2351,7 +2473,7 @@ function collectQuotationData(){
 
 function renderQuotationPreview(q){
   document.getElementById('qtpv_bizName').textContent = state.bizName;
-  document.getElementById('qtpv_bizPhone').textContent = 'Phone: ' + (state.bizPhone||'—');
+  document.getElementById('qtpv_bizPhone').textContent = 'Phone: ' + (normPhone(state.bizPhone)||'—');
   document.getElementById('qtpv_bizAddress').textContent = 'Address: ' + (state.bizAddress||'—');
   document.getElementById('qtpv_bizFb').textContent = 'Facebook: ' + (state.bizFb||'—');
   document.getElementById('qtpv_no').textContent = q.qtNo;
@@ -2455,6 +2577,7 @@ window.deleteQuotation = function(idx){
   if(qtNo){
     state.deletedQtNos.push(qtNo);
     STORE.set('td_deleted_quotations', state.deletedQtNos);
+    sendDelete('quotation', qtNo);
   }
   renderQuotationHistory();
 }
@@ -2568,6 +2691,11 @@ function init(){
   if(invoices){ state.invoices = invoices; }
   const expenses = STORE.get('td_expenses');
   if(expenses){ state.expenses = expenses; }
+  // one-time repair of rows pulled in earlier with ISO dates / a lost leading 0
+  let repaired = false;
+  state.invoices.forEach(i=>{ const d=sheetDate(i.date), m=normPhone(i.mobile); if(d!==i.date||m!==i.mobile){ i.date=d; i.mobile=m; repaired=true; } });
+  state.expenses.forEach(x=>{ const d=sheetDate(x.date); if(d!==x.date){ x.date=d; repaired=true; } });
+  if(repaired){ STORE.set('td_invoices', state.invoices); STORE.set('td_expenses', state.expenses); }
   const deletedInvoiceNos = STORE.get('td_deleted_invoices');
   if(deletedInvoiceNos){ state.deletedInvoiceNos = deletedInvoiceNos; }
   const deletedExpenseKeys = STORE.get('td_deleted_expenses');
@@ -2588,7 +2716,7 @@ function init(){
   if(qtCounter){ state.qtPrefix = qtCounter.prefix; state.qtNextNum = qtCounter.nextNum; }
 
   document.getElementById('set_bizName').value = state.bizName;
-  document.getElementById('set_bizPhone').value = state.bizPhone;
+  document.getElementById('set_bizPhone').value = normPhone(state.bizPhone);
   document.getElementById('set_bizAddress').value = state.bizAddress;
   document.getElementById('set_bizFb').value = state.bizFb;
   document.getElementById('set_prefix').value = state.prefix;
@@ -2775,7 +2903,7 @@ function init(){
   };
   document.getElementById('saveBizBtn').onclick = ()=>{
     state.bizName = document.getElementById('set_bizName').value;
-    state.bizPhone = document.getElementById('set_bizPhone').value;
+    state.bizPhone = normPhone(document.getElementById('set_bizPhone').value);
     state.bizAddress = document.getElementById('set_bizAddress').value;
     state.bizFb = document.getElementById('set_bizFb').value;
     STORE.set('td_business', {bizName:state.bizName,bizPhone:state.bizPhone,bizAddress:state.bizAddress,bizFb:state.bizFb});
