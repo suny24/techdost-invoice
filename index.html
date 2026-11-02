@@ -230,7 +230,7 @@
 
     <div class="card no-print" id="editModeBanner" style="display:none;background:#fff7e6;border-color:#f0c36d;">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-        <div><b>Editing invoice <span id="editModeInvoiceNo"></span></b> — make your changes and click "Update invoice" below.</div>
+        <div><b>Invoice <span id="editModeInvoiceNo"></span> is open</b> — change anything and click "Update invoice" to update it, or tap "Reset form" to start a new invoice.</div>
         <button class="btn btn-ghost" id="cancelEditBtn">Cancel edit</button>
       </div>
     </div>
@@ -1596,15 +1596,38 @@ function renderChallan(d, selectedIdx){
 }
 
 function saveInvoice(){
+  // ---- required info: a blank invoice must never be saved ----
+  const rawName = document.getElementById('custName').value.trim();
+  const rawMobile = document.getElementById('custMobile').value.trim();
+  if(!rawName){ toast('Customer name is required'); document.getElementById('custName').focus(); return; }
+  if(rawMobile.replace(/\D/g,'').length < 10){ toast('Enter a valid customer mobile number'); document.getElementById('custMobile').focus(); return; }
+  const prodRows = document.querySelectorAll('#prodBody tr.prod-main-row');
+  if(!prodRows.length){ toast('Add at least one product'); return; }
+  for(const tr of prodRows){
+    if(!tr.querySelector('.p-name').value.trim()){ toast('Enter the product name (or remove the empty row)'); tr.querySelector('.p-name').focus(); return; }
+    if(!(parseFloat(tr.querySelector('.p-qty').value) > 0)){ toast('Quantity must be at least 1'); tr.querySelector('.p-qty').focus(); return; }
+    if(!(parseFloat(tr.querySelector('.p-price').value) > 0)){ toast('Enter the selling price'); tr.querySelector('.p-price').focus(); return; }
+  }
+
   const d = collectFormData();
   if(!d.items.length){ toast('Add at least one product'); return; }
-  const isEditing = state.editingIndex !== null && state.editingIndex !== undefined;
-  if(isEditing){
-    state.invoices[state.editingIndex] = d;
+  const isEditing = state.editingInvoiceNo !== null && state.editingInvoiceNo !== undefined;
+  const sig = JSON.stringify(d);
+  // Pressing Save again without changing anything must not do anything
+  if(isEditing && state.lastSavedSig === sig){ toast('Already saved — nothing changed. Tap "Reset form" to start a new invoice.'); return; }
+
+  let editIdx = isEditing ? state.invoices.findIndex(i=>i.invoiceNo===state.editingInvoiceNo) : -1;
+  let wasUpdate = false;
+  if(editIdx >= 0){
+    state.invoices[editIdx] = d;
+    wasUpdate = true;
   } else {
     state.invoices.push(d);
-    state.nextNum += 1;
-    STORE.set('td_counter', {prefix: state.prefix, nextNum: state.nextNum});
+    editIdx = state.invoices.length - 1;
+    if(d.invoiceNo === currentInvoiceNo()){
+      state.nextNum += 1;
+      STORE.set('td_counter', {prefix: state.prefix, nextNum: state.nextNum});
+    }
   }
   // Protect this invoice from being overwritten by an incoming sync for a short
   // window — the push below is fire-and-forget, so a sync that lands before Apps
@@ -1613,14 +1636,15 @@ function saveInvoice(){
   state.recentlyEditedInvoices[d.invoiceNo] = Date.now();
   STORE.set('td_invoices', state.invoices);
   renderPreview(d);
-  toast(isEditing ? 'Invoice updated — ' + d.invoiceNo : 'Invoice saved — ' + d.invoiceNo);
-  if(isEditing){
-    state.editingIndex = null;
-    state.editingInvoiceNo = null;
-    document.getElementById('editModeBanner').style.display = 'none';
-    document.getElementById('saveBtn').textContent = 'Save invoice';
-  }
-  document.getElementById('invoiceNo').value = currentInvoiceNo();
+  toast(wasUpdate ? 'Invoice updated — ' + d.invoiceNo : 'Invoice saved — ' + d.invoiceNo);
+  // Stay on THIS invoice: any further Save click updates it instead of creating another one.
+  state.editingIndex = editIdx;
+  state.editingInvoiceNo = d.invoiceNo;
+  state.lastSavedSig = sig;
+  document.getElementById('invoiceNo').value = d.invoiceNo;
+  document.getElementById('editModeInvoiceNo').textContent = d.invoiceNo;
+  document.getElementById('editModeBanner').style.display = 'block';
+  document.getElementById('saveBtn').textContent = 'Update invoice';
 
   if(state.webhookUrl){
     fetch(state.webhookUrl, {
@@ -1824,6 +1848,7 @@ window.editInvoice = function(idx){
   document.getElementById('editModeBanner').style.display = 'block';
   document.getElementById('saveBtn').textContent = 'Update invoice';
   recalc();
+  state.lastSavedSig = JSON.stringify(collectFormData());
   toast('Editing ' + d.invoiceNo + ' — make your changes and update');
   window.scrollTo({top:0, behavior:'smooth'});
 }
@@ -1831,6 +1856,7 @@ window.editInvoice = function(idx){
 function cancelEditMode(){
   state.editingIndex = null;
   state.editingInvoiceNo = null;
+  state.lastSavedSig = null;
   document.getElementById('editModeBanner').style.display = 'none';
   document.getElementById('saveBtn').textContent = 'Save invoice';
   resetForm();
@@ -1841,6 +1867,11 @@ window.deleteInvoice = function(idx){
   const invoiceNo = state.invoices[idx] && state.invoices[idx].invoiceNo;
   state.invoices.splice(idx,1);
   STORE.set('td_invoices', state.invoices);
+  if(invoiceNo && invoiceNo === state.editingInvoiceNo){
+    state.editingIndex = null; state.editingInvoiceNo = null; state.lastSavedSig = null;
+    document.getElementById('editModeBanner').style.display = 'none';
+    document.getElementById('saveBtn').textContent = 'Save invoice';
+  }
   if(invoiceNo){
     state.deletedInvoiceNos.push(invoiceNo);
     STORE.set('td_deleted_invoices', state.deletedInvoiceNos);
