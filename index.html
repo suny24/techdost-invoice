@@ -1142,6 +1142,7 @@ const STORE = {
 };
 
 let state = {
+  recentlyDeleted: {},
   bizName:"TechDost BD", bizPhone:"", bizAddress:"", bizFb:"",
   signatureImage:"",
   showSignature:true,
@@ -1291,6 +1292,30 @@ function recalc(){
 
 function currentInvoiceNo(){
   return state.prefix + '-' + new Date().getFullYear() + '-' + String(state.nextNum).padStart(3,'0');
+}
+
+// If the invoice that was just removed was the newest one, the next new invoice takes
+// its number again (delete #12 -> the next invoice is #12, not #13).
+function freeNumberIfLatest(invoiceNo){
+  const year = new Date().getFullYear();
+  const escapedPrefix = state.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('^' + escapedPrefix + '-' + year + '-(\\d+)$');
+  const m = String(invoiceNo||'').match(re);
+  if(!m) return;
+  const n = parseInt(m[1],10);
+  let maxNum = 0;
+  (state.invoices||[]).forEach(inv=>{
+    const mm = (inv.invoiceNo||'').match(re);
+    if(mm){ const k = parseInt(mm[1],10); if(k > maxNum) maxNum = k; }
+  });
+  if(n > maxNum && n < state.nextNum){
+    state.nextNum = n;
+    STORE.set('td_counter', {prefix: state.prefix, nextNum: state.nextNum});
+    const field = document.getElementById('invoiceNo');
+    if(field && (state.editingInvoiceNo === null || state.editingInvoiceNo === undefined)) field.value = currentInvoiceNo();
+    const setField = document.getElementById('set_nextNum');
+    if(setField) setField.value = state.nextNum;
+  }
 }
 
 function recalcNextNumFromInvoices(){
@@ -1624,6 +1649,10 @@ function saveInvoice(){
   } else {
     state.invoices.push(d);
     editIdx = state.invoices.length - 1;
+    if(state.deletedInvoiceNos.includes(d.invoiceNo)){
+      state.deletedInvoiceNos = state.deletedInvoiceNos.filter(n=>n!==d.invoiceNo);
+      STORE.set('td_deleted_invoices', state.deletedInvoiceNos);
+    }
     if(d.invoiceNo === currentInvoiceNo()){
       state.nextNum += 1;
       STORE.set('td_counter', {prefix: state.prefix, nextNum: state.nextNum});
@@ -1876,23 +1905,8 @@ window.deleteInvoice = function(idx){
     state.deletedInvoiceNos.push(invoiceNo);
     STORE.set('td_deleted_invoices', state.deletedInvoiceNos);
     sendDelete('invoice', invoiceNo);
-    // If this was the most recently issued number (e.g. a mistaken invoice made
-    // right before deleting it), free it back up so the next invoice reuses it
-    // instead of leaving a permanent gap in the numbering.
-    const year = new Date().getFullYear();
-    const expected = `${state.prefix}-${year}-${String(state.nextNum-1).padStart(3,'0')}`;
-    if(invoiceNo === expected && state.nextNum > 1){
-      state.nextNum -= 1;
-      STORE.set('td_counter', {prefix: state.prefix, nextNum: state.nextNum});
-      // Also un-mark it as permanently deleted, since it's about to be reissued —
-      // otherwise this same device would refuse to ever sync it back in later.
-      state.deletedInvoiceNos = state.deletedInvoiceNos.filter(n=>n!==invoiceNo);
-      STORE.set('td_deleted_invoices', state.deletedInvoiceNos);
-      const field = document.getElementById('invoiceNo');
-      if(field) field.value = currentInvoiceNo();
-      const setField = document.getElementById('set_nextNum');
-      if(setField) setField.value = state.nextNum;
-    }
+    state.recentlyDeleted[invoiceNo] = Date.now();
+    freeNumberIfLatest(invoiceNo);
   }
   renderHistory();
   toast('Deleted');
@@ -2263,12 +2277,18 @@ function syncFromSheet(silent, done){
       // were re-issued/re-saved since (their row is back in the Sheet).
       const sheetInvoiceNos = new Set((data.invoices||[]).map(r=>String(r["Invoice No"])));
       const sheetQtNos = new Set((data.quotations||[]).map(r=>String(r["Quotation No"])));
+      if(Array.isArray(data.deleted)){
+        // A number that is in the Sheet again and no longer on the Deleted list was re-issued — accept it.
+        const deletedKeys = new Set(data.deleted.filter(r=>r["Type"]==='invoice').map(r=>String(r["Key"])));
+        state.deletedInvoiceNos = state.deletedInvoiceNos.filter(n=>!(sheetInvoiceNos.has(n) && !deletedKeys.has(n) && !(state.recentlyDeleted[n] && Date.now()-state.recentlyDeleted[n] < 180000)));
+      }
       (data.deleted||[]).forEach(row=>{
         const type = row["Type"], key = String(row["Key"]||'');
         if(!key) return;
         if(type==='invoice' && !sheetInvoiceNos.has(key)){
           if(!state.deletedInvoiceNos.includes(key)) state.deletedInvoiceNos.push(key);
           state.invoices = state.invoices.filter(i=>i.invoiceNo!==key);
+          freeNumberIfLatest(key);
         } else if(type==='quotation' && !sheetQtNos.has(key)){
           if(!state.deletedQtNos.includes(key)) state.deletedQtNos.push(key);
           state.quotations = state.quotations.filter(q=>q.qtNo!==key);
